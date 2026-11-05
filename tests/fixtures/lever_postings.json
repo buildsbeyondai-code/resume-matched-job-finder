@@ -1,0 +1,12 @@
+[
+  {"id": "aaa-111", "text": "Backend Engineer (Python)", "categories": {"location": "Remote - Germany", "commitment": "Full-time"},
+   "workplaceType": "remote", "country": "DE", "hostedUrl": "https://jobs.lever.co/examplecorp/aaa-111",
+   "createdAt": 1761990000000, "descriptionPlain": "Python, AWS and SQL. Kubernetes nice to have.",
+   "salaryRange": {"min": 70000, "max": 90000, "currency": "EUR"}},
+  {"id": "bbb-222", "text": "Senior Java Developer", "categories": {"location": "Munich, Germany"},
+   "workplaceType": "hybrid", "country": "DE", "hostedUrl": "https://jobs.lever.co/examplecorp/bbb-222",
+   "createdAt": 1761990000000, "descriptionPlain": "Java, Spring, Kafka."},
+  {"id": "ccc-333", "text": "Frontend Engineer", "categories": {"location": "Remote - Germany"},
+   "workplaceType": "remote", "country": "DE", "hostedUrl": "https://jobs.lever.co/examplecorp/ccc-333",
+   "createdAt": 1761990000000, "descriptionPlain": "Python tooling, Figma and Angular. Rust and Go."}
+]

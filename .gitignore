@@ -1,0 +1,8 @@
+upstream/
+.venv/
+data/
+.env
+__pycache__/
+*.pyc
+*.sqlite3*
+server.log

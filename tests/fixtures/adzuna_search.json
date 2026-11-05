@@ -1,0 +1,10 @@
+{"count": 2, "results": [
+  {"id": "5001", "title": "Python Developer (Remote)", "company": {"display_name": "SAP"},
+   "location": {"display_name": "Walldorf, Baden-Württemberg", "area": ["Deutschland", "Baden-Württemberg", "Walldorf"]},
+   "description": "Remote role. Python, SQL, SAP HANA.", "redirect_url": "https://www.adzuna.de/details/5001",
+   "created": "2026-11-02T09:00:00Z", "salary_min": 65000, "salary_max": 80000},
+  {"id": "5002", "title": "Accountant", "company": {"display_name": "Deloitte"},
+   "location": {"display_name": "Frankfurt", "area": ["Deutschland", "Hessen", "Frankfurt"]},
+   "description": "Excel and accounting.", "redirect_url": "https://www.adzuna.de/details/5002",
+   "created": "2026-11-02T09:00:00Z"}
+]}

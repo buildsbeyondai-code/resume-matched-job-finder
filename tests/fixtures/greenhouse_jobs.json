@@ -1,0 +1,11 @@
+{"jobs": [
+  {"id": 101, "title": "Backend Engineer (Python)", "location": {"name": "Remote - Germany"},
+   "absolute_url": "https://boards.greenhouse.io/examplecorp/jobs/101", "updated_at": "2026-11-01T10:00:00-04:00",
+   "content": "&lt;p&gt;We use Python, AWS and SQL daily.&lt;/p&gt;&lt;script&gt;alert(1)&lt;/script&gt;"},
+  {"id": 102, "title": "Office Manager", "location": {"name": "Berlin, Germany"},
+   "absolute_url": "https://boards.greenhouse.io/examplecorp/jobs/102", "updated_at": "2026-10-30T10:00:00-04:00",
+   "content": "&lt;p&gt;Organise our Berlin office. Excel required. Python is a plus.&lt;/p&gt;"},
+  {"id": 103, "title": "Data Engineer", "location": {"name": "Remote - US"},
+   "absolute_url": "https://boards.greenhouse.io/examplecorp/jobs/103", "updated_at": "2026-11-02T10:00:00-04:00",
+   "content": "&lt;p&gt;Python, Spark, Airflow.&lt;/p&gt;"}
+]}

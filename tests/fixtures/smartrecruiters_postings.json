@@ -1,0 +1,10 @@
+{"offset": 0, "limit": 100, "totalFound": 2, "content": [
+  {"id": "744000001", "name": "Cloud Engineer - Python / AWS", "releasedDate": "2026-11-03T08:00:00.000Z",
+   "company": {"identifier": "ExampleGroup", "name": "Example Group"},
+   "location": {"city": "Stuttgart", "region": "BW", "country": "de", "remote": true},
+   "department": {"label": "IT"}, "function": {"label": "Information Technology"}},
+  {"id": "744000002", "name": "Plant Technician", "releasedDate": "2026-11-03T08:00:00.000Z",
+   "company": {"identifier": "ExampleGroup", "name": "Example Group"},
+   "location": {"city": "Pune", "country": "in", "remote": false},
+   "department": {"label": "Manufacturing"}, "function": {"label": "Production"}}
+]}
