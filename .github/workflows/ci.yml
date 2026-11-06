@@ -1,0 +1,41 @@
+# CI for Resume-Matched Job Finder. Actions are pinned to full commit SHAs; the token is read-only.
+# No job talks to real employers, portals or Claude: tests use local fakes (tests/fake_careers.py,
+# tests/fake_claude.py) and tests/__init__.py blocks the real Claude CLI.
+name: ci
+on:
+  push:
+    branches: [master]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: "3.14"
+      - name: Install pinned dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --require-virtualenv -r requirements-lock.txt
+          .venv/bin/python -m playwright install --with-deps chromium
+      - name: Secret and personal-data scan
+        run: tools/scan_secrets.sh
+      - name: Tests with the 100% coverage gate on the apply/safety modules
+        run: tools/coverage.sh
+      - name: Mutation tests on the safety invariants
+        run: .venv/bin/python tools/mutation.py
+      - name: SBOM
+        run: .venv/bin/python tools/sbom.py > sbom.cdx.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: sbom
+          path: sbom.cdx.json

@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 from app import apply, config, details, direct, portals, server
 from app.db import DB
 from tests import fake_careers
-from tests.helpers import make_pdf
+from tests.helpers import make_pdf, authorize, GateHooks
 from tests.test_apply import _chromium_ok
 from tests.test_autoapply_integration import DETAILS, job
 
@@ -80,6 +80,7 @@ class PortalFallbackIntegration(unittest.TestCase):
         for j in cls.jobs.values():
             j["location"] = "Pune, India"
         cls.db = DB(":memory:")
+        authorize(cls.db)  # these tests submit to the local fake portals
         cls.db.upsert_postings(list(cls.jobs.values()))
         cls.db.set_setting("portal_pause_s", PAUSE_S)  # the UI allows 5-600 s; tests use a shorter pause
         cls.srv = server.make_server(cls.db, port=0)
@@ -99,6 +100,9 @@ class PortalFallbackIntegration(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        runner = getattr(cls.srv.RequestHandlerClass, "auto", None)
+        if runner is not None:  # a failed test must not leave jobs queued on the shared browser thread
+            runner.cancel()
         try:
             apply.ASSISTANT.call(lambda: apply.ASSISTANT.ctx and apply.ASSISTANT.ctx.close())
         except Exception:  # noqa: BLE001
@@ -220,7 +224,7 @@ class PortalFallbackIntegration(unittest.TestCase):
                          ("alex.sample@example.com", "+91 9000000000", "cv.pdf", "Yes"))
         self.assertTrue(Path(a["proof"]).is_file())
         # M6: a Submit with no confirmation is never counted as applied, and Submit is never pressed twice
-        self.assertEqual(apps[self.key("nocon")]["status"], "needs_you")
+        self.assertEqual(apps[self.key("nocon")]["status"], "outcome_unknown")  # never retried by itself
         self.assertIn("Confirmation not found", apps[self.key("nocon")]["reason"])
         self.assertFalse(apps[self.key("nocon")].get("proof"))
         self.assertEqual(self.fake.portal_applied["linkedin-72"]["pressed"], ["Next", "Review", "Submit application"])
@@ -246,6 +250,11 @@ class PortalFallbackIntegration(unittest.TestCase):
         apps, _ = self.wait()
         self.assertIn("LinkedIn showed a CAPTCHA", apps[self.key("nowhere")]["reason"])
         self.fake.walls["linkedin"] = None
+
+        # Outcome unknown is never queued again until the user records what happened
+        self.assertEqual(self.call("POST", "/api/autoapply", {"keys": [self.key("nocon")]})[1]["queued"], [])
+        code, _ = self.call("POST", f"/api/applications/{self.key('nocon')}/resolve", {"outcome": "not_submitted"})
+        self.assertEqual((code, self.db.app_get(self.key("nocon"))["status"]), (200, "failed"))
 
         # cancel: queued jobs are cancelled, the running one stops before it applies; Retry works afterwards
         self.call("PUT", "/api/settings", {"portal_pause_s": 600})

@@ -16,10 +16,11 @@ import math
 import threading
 import time
 
-from . import apply, config, details, portals
+from . import apply, audit, config, details, policy, portals, states
 
 ACTIVE = ("queued", "running")
 DONE = ("submitted", "applied_manually")
+LOCKED = DONE + ("outcome_unknown",)  # never queued again automatically (STATE_MACHINE_AND_IDEMPOTENCY.md)
 MAX_BATCH = 25
 
 
@@ -45,9 +46,36 @@ class _Hooks:
         self.used_portal = True
         self.runner.portal_gate(self.key, self.check)
 
+    def before_submit(self, what, channel):
+        """The policy gate and the submission claim, right before a click that may send the application."""
+        self.check()
+        db = self.runner.db
+        job = dict(db.posting(self.key) or {}, key=self.key)
+        self.sub_key = policy.gate(db, job, channel)
+        attempt = policy.claim(db, self.sub_key, self.key)
+        resume = details.resume_file()
+        audit.record(db, "submit.attempt", self.key, {
+            "attempt": attempt, "button": what[:80], "channel": channel, "company": job.get("company"),
+            "title": job.get("title"), "resume_sha256": audit.sha256_file(resume) if resume else None,
+            "resume_name": resume.name if resume else None})
+        db.app_set(self.key, "running", step=f"Submitting ({what[:40]})")
+
+    def after_submit(self, outcome, detail):
+        db = self.runner.db
+        if outcome == "submitted_ungated":  # a button not recognised as Submit sent the application
+            job = dict(db.posting(self.key) or {}, key=self.key)
+            self.sub_key = policy.submission_key(job)
+            audit.record(db, "submit.ungated", self.key, {"submission_key": self.sub_key, **detail})
+            if policy.state_of(db, self.sub_key) in (None, policy.NOT_SUBMITTED):
+                policy.claim(db, self.sub_key, self.key)
+            outcome = "submitted"
+        to = {"submitted": policy.SUBMITTED, "not_submitted": policy.NOT_SUBMITTED, "unknown": policy.UNKNOWN}[outcome]
+        if policy.state_of(db, self.sub_key) != to:
+            policy.move(db, self.sub_key, to, detail)
+
 
 def qid(label: str) -> str:
-    return hashlib.sha1(details.norm(details.clean_label(label)).encode()).hexdigest()[:12]
+    return hashlib.sha1(details.norm(details.clean_label(label)).encode(), usedforsecurity=False).hexdigest()[:12]
 
 
 class Runner:
@@ -62,7 +90,20 @@ class Runner:
         self.portal_starts = []  # when each portal application started (shown in tests and diagnostics)
         for a in db.app_list():  # a run interrupted by an app restart
             if a["status"] in ACTIVE:
-                db.app_set(a["key"], "failed", reason="Interrupted when the app stopped. Press Retry.")
+                if not self._unknown_if_submitting(a["key"], "the app stopped while Submit was being pressed"):
+                    db.app_set(a["key"], "failed", reason="Interrupted when the app stopped. Press Retry.")
+
+    def _unknown_if_submitting(self, key, why):
+        """A claim still SUBMITTING/CONFIRMING means Submit may have reached the site: record OUTCOME_UNKNOWN
+        (never retried automatically). Returns True when that happened."""
+        sub, st = policy.key_for_job(self.db, key)
+        if st not in (policy.SUBMITTING, policy.CONFIRMING):
+            return False
+        policy.move(self.db, sub, policy.UNKNOWN, {"why": why})
+        self.db.app_set(key, "outcome_unknown", step="", wait_until=None,
+                        reason=f"Outcome unknown: {why}. Check in the browser or your email whether the application "
+                               "was sent, then record it here.")
+        return True
 
     # --- queue ---
     def enqueue(self, keys):
@@ -71,7 +112,7 @@ class Runner:
         for k in list(dict.fromkeys(keys))[:MAX_BATCH]:
             job = self.db.posting(k)
             cur = self.db.app_get(k)
-            if not job or (cur and cur["status"] in DONE + ACTIVE):
+            if not job or (cur and cur["status"] in LOCKED + ACTIVE):
                 continue
             self.db.app_set(k, "queued", title=job.get("title"), company=job.get("company"),
                             job_url=job.get("url"), reason="", missing=[], queued_at=time.time())
@@ -104,6 +145,11 @@ class Runner:
             return self.db.app_set(key, "failed", reason="The job is no longer stored. Run the search again.")
         self.cancelled.clear()
         hooks = hooks or _Hooks(self, key)
+        try:
+            policy.can_start(self.db)
+        except policy.Blocked as e:
+            return self.db.app_set(key, "policy_blocked", reason=str(e), step="", wait_until=None,
+                                   title=job.get("title"), company=job.get("company"), job_url=job.get("url"))
         st = self.db.settings()
         job = dict(job, key=key, hooks=hooks, portals=portals.enabled(st.get("fallback_portals")),
                    ai=st.get("ai_answers", True))
@@ -112,10 +158,16 @@ class Runner:
         try:
             r = self.assistant.auto(job)
         except Cancelled as e:
+            if self._unknown_if_submitting(key, "the run was stopped while Submit was being pressed"):
+                return self.db.app_get(key)
             return self.db.app_set(key, "cancelled", reason=str(e), step="", wait_until=None)
         except apply.ApplyError as e:
+            if self._unknown_if_submitting(key, "the browser failed while Submit was being pressed"):
+                return self.db.app_get(key)
             return self.db.app_set(key, "failed", reason=str(e), step="", wait_until=None)
         except Exception as e:  # noqa: BLE001 - one job's failure must not stop the queue
+            if self._unknown_if_submitting(key, "the browser failed while Submit was being pressed"):
+                return self.db.app_get(key)
             return self.db.app_set(key, "failed", step="", wait_until=None,
                                    reason="Browser error: " + (str(e).splitlines() or ["unknown"])[0][:300])
         finally:
@@ -129,7 +181,7 @@ class Runner:
         if status == "submitted":
             data.update(proof=r.get("proof"), confirmation=r.get("confirmation"), submitted_at=time.time())
             self.db.set_job_state(key, "saved")
-        if status != "needs_you":  # keep the window open only when the user has to act in it
+        if status not in states.KEEP_WINDOW and r.get("session"):  # keep it open only when the user acts in it
             try:
                 self.assistant.close_session(r["session"])
             except Exception:  # noqa: BLE001
@@ -204,15 +256,36 @@ class Runner:
 
     def retry(self, key):
         a = self.db.app_get(key)
-        if not a or a["status"] in DONE + ACTIVE:
+        if not a or a["status"] in LOCKED + ACTIVE:
             return False
         self.db.app_set(key, "queued", queued_at=time.time(), reason="")
         self._kick()
         return True
 
+    def resolve(self, key, outcome):
+        """The user's answer for an Outcome unknown application: "submitted" or "not_submitted"."""
+        a = self.db.app_get(key)
+        if not a or a["status"] != "outcome_unknown" or outcome not in ("submitted", "not_submitted"):
+            return False
+        sub, st = policy.key_for_job(self.db, key)
+        if st == policy.UNKNOWN:
+            policy.move(self.db, sub, policy.SUBMITTED if outcome == "submitted" else policy.NOT_SUBMITTED,
+                        {"why": "recorded by the user"})
+        audit.record(self.db, "submit.resolved", key, {"outcome": outcome})
+        if outcome == "submitted":
+            self.db.app_set(key, "applied_manually", submitted_at=time.time(),
+                            reason="You confirmed the application was sent.")
+        else:
+            self.db.app_set(key, "failed", reason="You confirmed nothing was sent. Retry applies again.")
+        return True
+
     def mark_applied(self, key):
         a = self.db.app_get(key)
         if not a:
+            return False
+        if a["status"] == "outcome_unknown":
+            return self.resolve(key, "submitted")
+        if a["status"] in DONE:
             return False
         self.db.app_set(key, "applied_manually", submitted_at=time.time(), reason="Marked as applied by you.")
         return True

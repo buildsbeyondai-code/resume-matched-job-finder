@@ -9,6 +9,7 @@ import unittest
 
 from app import server
 from app.db import DB
+from tests.helpers import seed
 from tests.test_apply import _chromium_ok
 
 NAME_JS = """() => [...document.querySelectorAll('button, a[href], input, select, textarea')].filter((e) => {
@@ -103,10 +104,10 @@ class UIBrowser(unittest.TestCase):
         rows = [("a" * 16, "submitted", "company", "Company job"), ("b" * 16, "submitted", "naukri", "Naukri job"),
                 ("c" * 16, "submitted", "linkedin", "LinkedIn job")]
         for k, st, ch, t in rows:
-            self.db.app_set(k, st, title=t, company="Acme", channel=ch, site="x")
-        self.db.app_set("d" * 16, "needs_you", title="Walled job", company="Echo", url="https://www.naukri.com/job-listings-1",
+            seed(self.db, k, st, title=t, company="Acme", channel=ch, site="x")
+        seed(self.db, "d" * 16, "needs_you", title="Walled job", company="Echo", url="https://www.naukri.com/job-listings-1",
                         reason="Naukri needs a sign-in. Open Settings, select Sign in to Naukri, then press Retry.")
-        self.db.app_set("e" * 16, "running", title="Waiting job", company="Bolt", wait_until=time.time() + 30,
+        seed(self.db, "e" * 16, "running", title="Waiting job", company="Bolt", wait_until=time.time() + 30,
                         step="Waiting 30 s before the next job-portal application (rate limit)")
         self.open("applications")
         items = p.inner_text("#appList")
@@ -120,7 +121,7 @@ class UIBrowser(unittest.TestCase):
         self.assertEqual(link.get_attribute("href"), "https://www.naukri.com/job-listings-1")
         # Cancel stops the run: the running job is flagged, the panel hides when nothing is active
         p.click("#appCancel")
-        self.db.app_set("e" * 16, "cancelled", reason="Cancelled by you. Press Retry to apply.", wait_until=None)
+        seed(self.db, "e" * 16, "cancelled", reason="Cancelled by you. Press Retry to apply.", wait_until=None)
         p.wait_for_selector("#appRun", state="hidden", timeout=5000)
         self.assertIn("Cancelled", p.inner_text("#appList"))
         self.assertEqual(p.locator("#appList .chip.st-cancelled").count(), 1)

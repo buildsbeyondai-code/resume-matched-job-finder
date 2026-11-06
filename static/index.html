@@ -256,6 +256,32 @@
 
 <section id="view-settings" data-view="settings" aria-labelledby="h-settings" hidden>
   <h1 id="h-settings">Settings</h1>
+  <form id="policyForm" class="panel grid-form" novalidate aria-labelledby="h-policy" aria-describedby="policyNow">
+    <h2 id="h-policy" class="h3 span-all">Application policy</h2>
+    <p id="policyNow" class="span-all policy-now" role="status"></p>
+    <fieldset class="span-all fieldset">
+      <legend class="h3">What may the app do?</legend>
+      <label class="check radio" for="pm-search"><input type="radio" name="pmode" id="pm-search" value="SEARCH_ONLY" aria-describedby="pm-search-d">
+        <span><strong>Search only</strong> <span id="pm-search-d" class="hint">Find and rank jobs. The browser is never driven and nothing is sent.</span></span></label>
+      <label class="check radio" for="pm-prepare"><input type="radio" name="pmode" id="pm-prepare" value="PREPARE_FOR_REVIEW" aria-describedby="pm-prepare-d">
+        <span><strong>Prepare for review</strong> <span id="pm-prepare-d" class="hint">Fill each application up to its Submit button, then stop. You check it and press Submit yourself.</span></span></label>
+      <label class="check radio" for="pm-auto"><input type="radio" name="pmode" id="pm-auto" value="AUTHORIZED_AUTO_SUBMIT" aria-describedby="pm-auto-d">
+        <span><strong>Submit automatically</strong> <span id="pm-auto-d" class="hint">Send applications in your name within the limits below, after you confirm them. The permission ends on its expiry date or when you switch it off.</span></span></label>
+    </fieldset>
+    <div class="field small"><label for="p-cap">Applications per day (at most)</label><input id="p-cap" type="number" min="1" max="100" step="1" inputmode="numeric"></div>
+    <div class="field small"><label for="p-days">Permission lasts (days)</label><input id="p-days" type="number" min="1" max="365" step="1" inputmode="numeric"></div>
+    <div class="field span-all"><label for="p-excl">Never apply to these employers</label><input id="p-excl" autocomplete="off" aria-describedby="p-excl-d">
+      <span id="p-excl-d" class="hint desc">Comma-separated, for example your current employer</span></div>
+    <fieldset class="span-all plainset"><legend class="field-label">Where Submit may be pressed</legend>
+      <div class="row wrap">
+        <label class="check" for="p-ch-company"><input type="checkbox" id="p-ch-company" value="company"> Company websites</label>
+        <label class="check" for="p-ch-naukri"><input type="checkbox" id="p-ch-naukri" value="naukri"> Naukri</label>
+        <label class="check" for="p-ch-linkedin"><input type="checkbox" id="p-ch-linkedin" value="linkedin"> LinkedIn</label>
+      </div></fieldset>
+    <p id="policyErr" class="field-error span-all" role="alert" hidden></p>
+    <div class="actions span-all"><button type="submit" class="btn secondary">Save policy</button><span id="policySaved" class="muted" role="status"></span>
+      <a class="btn text" href="/api/audit" target="_blank" rel="noopener">Audit log<span class="sr-only"> (opens in a new tab)</span></a></div>
+  </form>
   <form id="settingsForm" class="panel grid-form" novalidate>
     <h2 class="h3 span-all">Search defaults</h2>
     <div class="field"><label for="s-countries">Countries</label><input id="s-countries" autocomplete="off"></div>
@@ -348,6 +374,14 @@
   <p id="resumeText">Applications will be submitted in your name again from the next scheduled run.</p>
   <div class="row end"><button type="button" class="btn text" id="resumeCancel">Keep paused</button>
     <button type="button" class="btn primary" id="resumeOk">Resume auto-apply</button></div>
+</dialog>
+
+<dialog id="consentDlg" aria-labelledby="consentTitle" aria-describedby="consentText">
+  <h2 id="consentTitle" class="h3">Allow automatic submission?</h2>
+  <p id="consentText" class="consent-text"></p>
+  <p class="hint">Sign-ins, CAPTCHAs, legal declarations and questions your details don't answer always come back to you. Job portals' own rules still apply.</p>
+  <div class="row end"><button type="button" class="btn text" id="consentCancel">Cancel</button>
+    <button type="button" class="btn primary" id="consentOk">I allow this</button></div>
 </dialog>
 
 <dialog id="autoDlg" aria-labelledby="autoTitle">

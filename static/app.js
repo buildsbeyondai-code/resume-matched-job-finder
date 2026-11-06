@@ -33,7 +33,7 @@ function showTab() {
   document.title = `${$(`#view-${valid} h1`).textContent} · Resume-Matched Job Finder`;
   if (valid === "saved") loadSaved();
   if (valid === "applications") loadApps();
-  if (valid === "settings") loadPortals();
+  if (valid === "settings") { loadPortals(); loadPolicy(); }
   if (valid === "unattended") loadUA(true);
   if (valid === "today") loadSummary();
   if (valid === "runlog") loadRunLog();
@@ -318,7 +318,10 @@ $("#undoBtn").addEventListener("click", async () => {
 /* ---------- auto apply ---------- */
 const STATUS = { queued: "Queued", running: "Applying now", submitted: "Submitted", applied_manually: "Applied (by you)",
   needs_answers: "Needs your answers", needs_you: "Needs you", no_company_site: "No company website", failed: "Failed",
-  cancelled: "Cancelled", dismissed: "Dismissed" };
+  cancelled: "Cancelled", dismissed: "Dismissed", ready_for_review: "Ready for your review",
+  policy_blocked: "Blocked by your policy", outcome_unknown: "Outcome unknown" };
+const RETRYABLE = ["needs_you", "failed", "no_company_site", "cancelled", "policy_blocked", "ready_for_review"];
+const OPENABLE = ["needs_you", "no_company_site", "ready_for_review", "outcome_unknown"];
 const CHANNEL = { naukri: "Naukri", linkedin: "LinkedIn" };
 // where the application was made: the company's own site unless a portal was used
 const viaLabel = (a) => (a.status === "submitted" ? `via ${CHANNEL[a.channel] || "company site"}` : "");
@@ -377,7 +380,7 @@ function renderApplyDlg(a) {
   if (need) { const qs = $("#applyQs"); qs.replaceChildren(...a.missing.map((q, i) => questionInput(q, `apq-${i}`))); $("#applyQs [data-qid]").focus(); }
   const proof = a && a.proof; $("#applyProof").hidden = !proof;
   if (proof) $("#applyProofLink").href = `/api/applications/${a.key}/proof`;
-  $("#applyRetry").hidden = !(a && ["needs_you", "failed", "no_company_site", "cancelled"].includes(a.status));
+  $("#applyRetry").hidden = !(a && RETRYABLE.includes(a.status));
 }
 async function pollApply() {
   clearTimeout(AP.poll);
@@ -418,10 +421,16 @@ $("#applyDlg").addEventListener("close", () => { clearTimeout(AP.poll); if (AP.o
 function autoCandidates() {
   return visibleJobs().filter((j) => j.state !== "hidden" && /^https:\/\//.test(j.url) && !["submitted", "applied_manually"].includes((AP.apps[j.key] || {}).status));
 }
-$("#autoBtn").addEventListener("click", () => {
+$("#autoBtn").addEventListener("click", async () => {
   const n = Math.min(autoCandidates().length, 25);
-  $("#autoText").textContent = n ? `Submit applications in your name to the top ${n} job${n === 1 ? "" : "s"} shown (minimum match ${$("#r-min").value || 0}), on each company's own website? Jobs already applied to are skipped. Questions your resume details can't answer are collected on the Applications tab.` : "No jobs to apply to: every shown job is already applied to or has no link.";
-  $("#autoOk").hidden = !n;
+  if (!POLICY) await loadPolicy();
+  const mode = POLICY ? POLICY.effective_mode : "SEARCH_ONLY";
+  const what = { SEARCH_ONLY: "Applying is switched off (Search only). Choose \"Prepare for review\" or \"Submit automatically\" in Settings → Application policy.",
+    PREPARE_FOR_REVIEW: `Fill the applications for the top ${n} job${n === 1 ? "" : "s"} shown on each company's own website and stop before Submit, so you can check and send each one yourself?`,
+    AUTHORIZED_AUTO_SUBMIT: `Submit applications in your name to the top ${n} job${n === 1 ? "" : "s"} shown (minimum match ${$("#r-min").value || 0}), on each company's own website, within your policy (at most ${POLICY && POLICY.daily_cap} a day)? Jobs already applied to are skipped.` }[mode];
+  $("#autoText").textContent = n ? `${what} Questions your resume details can't answer are collected on the Applications tab.` : "No jobs to apply to: every shown job is already applied to or has no link.";
+  $("#autoOk").hidden = !n || mode === "SEARCH_ONLY";
+  $("#autoOk").textContent = mode === "PREPARE_FOR_REVIEW" ? "Prepare applications" : "Submit applications";
   $("#autoDlg").showModal();
 });
 $("#autoCancel").addEventListener("click", () => $("#autoDlg").close());
@@ -451,17 +460,29 @@ async function loadApps() {
     const actions = el("div", { className: "row" });
     if (a.proof) actions.append(el("a", { className: "btn text", href: `/api/applications/${a.key}/proof`, target: "_blank", rel: "noopener", textContent: "Proof" }));
     const open = /^https:\/\//.test(a.url || "") ? a.url : a.job_url;
-    if (["needs_you", "no_company_site"].includes(a.status) && /^https:\/\//.test(open || "")) {
+    if (OPENABLE.includes(a.status) && /^https:\/\//.test(open || "")) {
       const ob = el("a", { className: "btn text", href: open, target: "_blank", rel: "noopener noreferrer", textContent: "Open in browser" },
         el("span", { className: "sr-only", textContent: ` to finish ${a.title} yourself (opens in a new tab)` }));
       actions.append(ob);
     }
-    if (["needs_you", "failed", "no_company_site", "cancelled"].includes(a.status)) {
+    if (a.status === "outcome_unknown") {  // Submit may have reached the site: only you can tell, it is never retried
+      for (const [label, outcome] of [["It was sent", "submitted"], ["It was not sent", "not_submitted"]]) {
+        const b = el("button", { type: "button", className: "btn text", textContent: label },
+          el("span", { className: "sr-only", textContent: `: ${a.title}` }));
+        b.addEventListener("click", async () => {
+          try { await api("POST", `/api/applications/${a.key}/resolve`, { outcome }); announce(`Recorded: ${label.toLowerCase()}.`); }
+          catch (x) { announce(x.message); }
+          loadApps();
+        });
+        actions.append(b);
+      }
+    }
+    if (RETRYABLE.includes(a.status)) {
       const rt = el("button", { type: "button", className: "btn text", textContent: "Retry" });
       rt.addEventListener("click", async () => { await api("POST", `/api/applications/${a.key}/retry`); loadApps(); });
       actions.append(rt);
     }
-    if (["needs_you", "no_company_site"].includes(a.status)) {
+    if (["needs_you", "no_company_site", "ready_for_review", "policy_blocked"].includes(a.status)) {
       const mk = el("button", { type: "button", className: "btn text", textContent: "I applied" });
       mk.addEventListener("click", async () => { await api("POST", `/api/applications/${a.key}/mark`); loadApps(); });
       actions.append(mk);
@@ -892,3 +913,48 @@ $("#logRetry").addEventListener("click", () => loadRunLog());
   try { await loadState(); await loadResults(); updateSavedCount(); }
   catch (x) { showFail(x.message); }
 })();
+
+
+/* ---------- application policy (SEARCH_ONLY / PREPARE_FOR_REVIEW / AUTHORIZED_AUTO_SUBMIT) ---------- */
+const MODE_TEXT = { SEARCH_ONLY: "Search only: nothing is filled or sent.",
+  PREPARE_FOR_REVIEW: "Prepare for review: applications are filled and stop before Submit.",
+  AUTHORIZED_AUTO_SUBMIT: "Submit automatically" };
+let POLICY = null;
+function policyBody() {
+  return { mode: (document.querySelector('input[name="pmode"]:checked') || {}).value,
+    daily_cap: +$("#p-cap").value, expires_days: +$("#p-days").value, excluded_companies: list($("#p-excl").value),
+    channels: ["company", "naukri", "linkedin"].filter((c) => $(`#p-ch-${c}`).checked) };
+}
+function renderPolicy(p) {
+  POLICY = p;
+  const r = document.getElementById({ SEARCH_ONLY: "pm-search", PREPARE_FOR_REVIEW: "pm-prepare", AUTHORIZED_AUTO_SUBMIT: "pm-auto" }[p.mode]);
+  if (r) r.checked = true;
+  $("#p-cap").value = p.daily_cap; $("#p-days").value = p.expires_days; $("#p-excl").value = p.excluded_companies.join(", ");
+  for (const c of ["company", "naukri", "linkedin"]) $(`#p-ch-${c}`).checked = p.channels.includes(c);
+  let now = MODE_TEXT[p.effective_mode];
+  if (p.effective_mode === "AUTHORIZED_AUTO_SUBMIT") now += ` until ${new Date(p.consent.expires * 1000).toLocaleDateString()}: ${p.submitted_today} of ${p.daily_cap} sent today.`;
+  else if (p.mode === "AUTHORIZED_AUTO_SUBMIT") now = "Automatic submission is paused: its permission expired or the limits changed. Save the policy to confirm it again. Until then: " + MODE_TEXT.PREPARE_FOR_REVIEW;
+  $("#policyNow").textContent = now; $("#policyNow").dataset.mode = p.effective_mode;
+}
+async function loadPolicy() { try { renderPolicy(await api("GET", "/api/policy")); } catch (x) { $("#policyNow").textContent = x.message; } }
+async function savePolicy(body) {
+  const err = $("#policyErr"); err.hidden = true;
+  try { renderPolicy(await api("PUT", "/api/policy", body)); $("#policySaved").textContent = "Policy saved."; setTimeout(() => ($("#policySaved").textContent = ""), 4000); }
+  catch (x) { err.textContent = x.message; err.hidden = false; }
+}
+$("#policyForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = policyBody();
+  if (body.mode !== "AUTHORIZED_AUTO_SUBMIT") return savePolicy(body);
+  try {  // show the exact scope; saving needs the hash of what was shown
+    const prev = await api("POST", "/api/policy/preview", body);
+    $("#consentText").textContent = prev.summary; $("#consentDlg").dataset.hash = prev.summary_hash;
+    $("#consentDlg").showModal();
+  } catch (x) { $("#policyErr").textContent = x.message; $("#policyErr").hidden = false; }
+});
+$("#consentCancel").addEventListener("click", () => $("#consentDlg").close());
+$("#consentOk").addEventListener("click", async () => {
+  $("#consentDlg").close();
+  await savePolicy(Object.assign(policyBody(), { confirm: $("#consentDlg").dataset.hash }));
+});
+$("#consentDlg").addEventListener("close", () => $("#policyForm button[type=submit]").focus());

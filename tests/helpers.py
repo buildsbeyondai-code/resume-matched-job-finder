@@ -78,3 +78,43 @@ class FakeNet:
                     raise val
                 return val if isinstance(val, str) else json.dumps(val)
         raise AssertionError(f"unexpected URL {url}")
+
+
+def authorize(db, **scope):
+    """Grant automatic submission the way the user does in Settings: preview the summary, confirm its hash.
+    Tests that expect applications to be submitted call this; everything else runs under the SEARCH_ONLY default."""
+    from app import policy
+    body = {"mode": policy.AUTO, **scope}
+    prev, errors = policy.preview_summary(db, body)
+    assert not errors, errors
+    out, errors = policy.update(db, dict(body, confirm=prev["summary_hash"]))
+    assert not errors, errors
+    return out
+
+
+class GateHooks:
+    """Runner-style hooks for tests that drive Assistant._auto directly: every gate allows, outcomes are kept."""
+    def __init__(self, allow=True):
+        self.allow, self.outcomes, self.gates = allow, [], []
+
+    def before_submit(self, what, channel):
+        from app import policy
+        self.gates.append((what, channel))
+        if not self.allow:
+            raise policy.Blocked("blocked in test", "policy_blocked")
+
+    def after_submit(self, outcome, detail):
+        self.outcomes.append(outcome)
+
+
+def seed(db, key, status, **data):
+    """Put an application row into a given status for a test fixture, bypassing the state machine (production
+    code must go through db.app_set, which enforces app/states.py)."""
+    import json as _json
+    import time as _time
+    cur = db.app_get(key) or {}
+    cur.update(data)
+    for k in ("key", "status", "updated"):
+        cur.pop(k, None)
+    db.x("INSERT OR REPLACE INTO applications(key,status,data,updated) VALUES(?,?,?,?)",
+         (key, status, _json.dumps(cur), _time.time()))

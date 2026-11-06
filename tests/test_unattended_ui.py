@@ -8,6 +8,7 @@ import time
 import unittest
 
 from app import unattended
+from tests.helpers import seed
 from tests.test_apply import _chromium_ok
 from tests.test_ui_browser import NAME_JS
 from tests.test_unattended import SCORES, Base, board
@@ -182,7 +183,7 @@ class UnattendedUI(Base):
         now = time.time()
         for i in range(2):
             self.ua._job_row(run_id, {"key": f"{i:016x}", "title": f"Applied {i}", "company": "C", "score": 85}, "submitted", "Thanks", "Board A", now)
-        self.db.app_set("5" * 16, "needs_you", title="Parked", company="P Co", reason="Sign-in", job_url="https://jobs.example.test/p")
+        seed(self.db, "5" * 16, "needs_you", title="Parked", company="P Co", reason="Sign-in", job_url="https://jobs.example.test/p")
         self.ua._job_row(run_id, {"key": "5" * 16, "title": "Parked", "company": "P Co", "score": 88}, "needs_you", "x.example needs a sign-in.", "Board A", now)
         for i in range(5):
             self.ua._job_row(run_id, {"key": f"{i + 9:016x}", "title": f"Skip {i}", "company": "C", "score": 81}, "skipped", "company cooldown until 2026-12-01", "Board A", now)

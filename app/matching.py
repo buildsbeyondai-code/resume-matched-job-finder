@@ -97,7 +97,7 @@ def norm_key(p) -> str:
         return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
     loc = n(p.get("location", "")).split(" ")[0] if p.get("location") else ""
     base = f"{n(p.get('company'))}|{n(p.get('title'))}|{loc}"
-    return hashlib.sha1(base.encode()).hexdigest()[:16]
+    return hashlib.sha1(base.encode(), usedforsecurity=False).hexdigest()[:16]
 
 
 def enrich(p) -> dict:

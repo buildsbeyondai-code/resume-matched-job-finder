@@ -31,15 +31,30 @@ def sniff(data: bytes) -> str:
 W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 
+MAX_XML = 50 * 1024 * 1024       # decompressed word/document.xml
+MAX_ZIP_ENTRIES = 2000
+MAX_PDF_INFLATE = 60 * 1024 * 1024  # all PDF streams together, decompressed
+
+
 def docx_text(data: bytes) -> str:
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as z:
+            if len(z.infolist()) > MAX_ZIP_ENTRIES:
+                raise ResumeError("The DOCX file has too many parts to be a resume.")
             info = z.getinfo("word/document.xml")
-            if info.file_size > 50 * 1024 * 1024:
+            if info.file_size > MAX_XML:
                 raise ResumeError("The DOCX file is too large once decompressed.")
-            xml = z.read("word/document.xml")
-    except (zipfile.BadZipFile, KeyError) as e:
+            with z.open(info) as f:  # the declared size can lie: read at most MAX_XML + 1 bytes
+                xml = f.read(MAX_XML + 1)
+            if len(xml) > MAX_XML:
+                raise ResumeError("The DOCX file is too large once decompressed.")
+    except ResumeError:
+        raise
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, KeyError, NotImplementedError, RuntimeError, OSError,
+            EOFError, ValueError, zlib.error) as e:
         raise ResumeError("The DOCX file is damaged and could not be opened.") from e
+    if b"<!DOCTYPE" in xml[:4096].upper() or b"<!ENTITY" in xml.upper():
+        raise ResumeError("The DOCX file contains XML features a Word document never uses, so it was not read.")
     try:
         root = ElementTree.fromstring(xml)
     except ElementTree.ParseError as e:
@@ -135,7 +150,7 @@ def pdf_text(data: bytes) -> str:
     t = _pypdf_text(data)
     if t and readable(t):
         return t
-    texts = []
+    texts, inflated = [], 0
     for m in STREAM_RE.finditer(data):
         head, body = m.group(1), m.group(2)
         if b"/FlateDecode" in head:
@@ -143,6 +158,9 @@ def pdf_text(data: bytes) -> str:
                 body = zlib.decompressobj().decompress(body, 20 * 1024 * 1024)
             except zlib.error:
                 continue
+            inflated += len(body)
+            if inflated > MAX_PDF_INFLATE:  # many small streams that expand hugely: stop, keep what was read
+                break
         elif b"/Filter" in head:
             continue  # images and other encodings are skipped
         if b"BT" in body:

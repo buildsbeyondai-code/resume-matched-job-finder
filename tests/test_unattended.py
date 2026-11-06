@@ -18,7 +18,7 @@ from pathlib import Path
 from app import apply, autoapply, config, matching, sources, unattended
 from app.db import DB
 from app.server import make_server
-from tests.helpers import RESUME_LINES, FakeNet
+from tests.helpers import RESUME_LINES, FakeNet, authorize, GateHooks, seed
 
 SCORES = {}  # posting title -> match score (the real scorer is replaced so tests control the numbers exactly)
 REAL_SCORE = matching.score
@@ -101,6 +101,7 @@ class Base(unittest.TestCase):
 
     def start(self):
         self.db = DB(self.dbfile)
+        authorize(self.db)
         self.srv = make_server(self.db, port=0)
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
         self.base = f"http://127.0.0.1:{self.srv.server_address[1]}"
@@ -306,10 +307,10 @@ class Runs(Base):
         self.net.routes["/boards/a/"] = board(*jobs)
         # one job the user applied to by hand; one hidden; a company applied to 3 days ago (30-day cooldown)
         key = {t: matching.norm_key({"title": t, "company": c, "location": "Remote"}) for t, c in jobs}
-        self.db.app_set(key["Manual Done"], "applied_manually", title="Manual Done", company="Hand Co")
+        seed(self.db, key["Manual Done"], "applied_manually", title="Manual Done", company="Hand Co")
         self.db.set_job_state(key["Hidden Job"], "hidden")
         three_days = time.time() - 3 * 86400
-        self.db.app_set("c" * 16, "submitted", title="Earlier", company="Cool Co Pvt Ltd", submitted_at=three_days)
+        seed(self.db, "c" * 16, "submitted", title="Earlier", company="Cool Co Pvt Ltd", submitted_at=three_days)
         self.setup_on([sid_a, sid_b], daily_cap=2)
         run_id, _ = self.go()
         rows = self.db.q("SELECT title, outcome, reason FROM ua_jobs WHERE run_id=? ORDER BY id", (run_id,))
@@ -408,7 +409,7 @@ class Runs(Base):
         self.assertIn("page crashed", rows["Crash Job"]["reason"])
         self.assertIn("company's own website", rows["Agg Job"]["reason"])
         key = rows["Proofless"]["key"]
-        self.assertEqual(self.db.app_get(key)["status"], "needs_you")  # not counted as Submitted without proof
+        self.assertEqual(self.db.app_get(key)["status"], "outcome_unknown")  # not Submitted without proof, never retried
         self.assertEqual(self.db.app_get(rows["Question Job"]["key"])["status"], "needs_answers")  # Answer once works
         st = self.call("GET", "/api/unattended")[1]
         self.assertEqual((st["needs_you"], st["today"]["submitted"]), (10, 0))
@@ -416,7 +417,7 @@ class Runs(Base):
         code, st = self.call("POST", f"/api/unattended/jobs/{rows['Captcha Job']['id']}/dismiss")
         self.assertEqual((code, st["needs_you"]), (200, 9))
         self.assertEqual(self.db.app_get(rows["Captcha Job"]["key"])["status"], "dismissed")
-        self.db.app_set(rows["Question Job"]["key"], "submitted")
+        seed(self.db, rows["Question Job"]["key"], "submitted")
         self.assertEqual(self.call("GET", "/api/unattended")[1]["needs_you"], 8)
         self.assertTrue(self.ua.dismiss(rows["Question Job"]["id"]))  # already resolved: the app status is kept
         self.assertEqual(self.db.app_get(rows["Question Job"]["key"])["status"], "submitted")
@@ -629,10 +630,12 @@ class Safety(Base):
         # the app was closed for 3 intervals: on start exactly one catch-up run happens
         self.stop()
         self.db = DB(self.dbfile)
+        authorize(self.db)
         self.db.set_setting("unattended", {**self.db.get_setting("unattended"), "last_tick": time.time() - 3 * 3600})
         self.db.conn.close()
         before = len(DB(self.dbfile).q("SELECT id FROM ua_runs"))
         self.db = DB(self.dbfile)
+        authorize(self.db)
         srv = make_server(self.db, port=0)  # starts the real timer
         ua = srv.RequestHandlerClass.unattended
         srv.RequestHandlerClass.auto.assistant = self.fake
@@ -689,11 +692,11 @@ class Safety(Base):
         SCORES.update({"Wait Job": 95})
         self.net.routes["/boards/a/"] = board(("Wait Job", "W Co"))
         self.setup_on([sid])
-        self.db.app_set("9" * 16, "queued", title="Manual", company="M")
+        seed(self.db, "9" * 16, "queued", title="Manual", company="M")
         run_id, _ = self.go()
         self.assertEqual(self.db.q("SELECT reason FROM ua_jobs WHERE run_id=?", (run_id,))[0]["reason"],
                          "deferred: another auto apply is running")
-        self.db.app_set("9" * 16, "cancelled")
+        seed(self.db, "9" * 16, "cancelled")
 
         def cancelled_by_user(job):
             self.runner.cancelled.set()  # the Applications tab's "Cancel auto apply"
@@ -740,8 +743,8 @@ class Helpers(unittest.TestCase):
         db = DB(":memory:")
         ua = unattended.Unattended(db, autoapply.Runner(db, assistant=object()), start=False)
         now = time.time()
-        db.app_set("a" * 16, "submitted", company="Acme", submitted_at=now - 86400)
-        db.app_set("b" * 16, "needs_you", company="Bolt")
+        seed(db, "a" * 16, "submitted", company="Acme", submitted_at=now - 86400)
+        seed(db, "b" * 16, "needs_you", company="Bolt")
         self.assertIsNone(ua.cooldown_until("Acme", 0, now))
         self.assertIsNone(ua.cooldown_until("Bolt", 30, now))
         self.assertIsNone(ua.cooldown_until("Acme", 1, now + 2 * 86400))

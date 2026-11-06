@@ -15,7 +15,7 @@ from unittest import mock
 
 from app import apply, autoapply, config, details, direct, server, sources
 from app.db import DB
-from tests.helpers import FakeNet, make_pdf
+from tests.helpers import FakeNet, make_pdf, authorize, GateHooks, seed
 
 
 # ---------------- fake browser objects ----------------
@@ -405,7 +405,7 @@ class AutoStepBranches(TmpDetails):
                 page.closed = True
                 FakePage(ctx=ctx)
             loc.click = click
-        return a._auto({"key": "k", "title": "T", "company": "C"}, max_steps=max_steps)
+        return a._auto({"key": "k", "title": "T", "company": "C", "hooks": GateHooks()}, max_steps=max_steps)
 
     def test_auto_outcomes(self):
         self.assertEqual(self.run_auto({"manual": ["Cover letter: attach"]})["status"], "needs_you")
@@ -418,6 +418,9 @@ class AutoStepBranches(TmpDetails):
         r = self.run_auto({}, buttons=[])
         self.assertIn("No Submit button", r["reason"])
         r = self.run_auto({}, buttons=[{"id": "b1", "kind": "submit", "text": "Submit"}], click_fail=True)
+        self.assertEqual(r["status"], "outcome_unknown")  # a failed Submit click may still have reached the site
+        self.assertIn("may not have been pressed", r["reason"])
+        r = self.run_auto({}, buttons=[{"id": "b1", "kind": "next", "text": "Next"}], click_fail=True)
         self.assertIn("could not be clicked", r["reason"])
         r = self.run_auto({}, buttons=[{"id": "b1", "kind": "submit", "text": "Submit"}], captcha=(False, True))
         self.assertIn("after Submit", r["reason"])
@@ -454,9 +457,10 @@ class RunnerBranches(TmpDetails):
 
     def test_runner_paths(self):
         db = DB(":memory:")
+        authorize(db)
         db.upsert_postings([self.job(k) for k in ("a" * 16, "b" * 16, "c" * 16)])
-        db.app_set("c" * 16, "running")
-        db.app_set("f" * 16, "submitted")
+        seed(db, "c" * 16, "running")
+        seed(db, "f" * 16, "submitted")
         fa = FakeAssistant({"a" * 16: apply.ApplyError("The job page did not load"), "b" * 16: Boom("")})
         r = autoapply.Runner(db, fa)
         self.assertEqual(db.app_get("c" * 16)["status"], "failed")  # interrupted by a restart
@@ -470,7 +474,7 @@ class RunnerBranches(TmpDetails):
         self.assertEqual(fa.closed, ["s-" + "c" * 16])  # closing errors are ignored
         # the same question from a second job: options merged from whichever job has them
         db.upsert_postings([self.job("e" * 16)])
-        db.app_set("e" * 16, "needs_answers", company="C" + "e" * 16, missing=[{"id": "f9", "label": "Notice period", "kind": "select",
+        seed(db, "e" * 16, "needs_answers", company="C" + "e" * 16, missing=[{"id": "f9", "label": "Notice period", "kind": "select",
                                                          "options": ["30 days", "60 days"], "canon": "Notice period",
                                                          "qid": autoapply.qid("Notice period")}])
         db.x("UPDATE applications SET updated=updated+1000 WHERE key=?", ("c" * 16,))  # c (no options) first
@@ -491,6 +495,7 @@ class RouteBranches(TmpDetails):
         (self.dir / details.FILENAME).write_text("- First name: Alex\n- Resume file: cv.pdf\n", encoding="utf-8")
         (self.dir / "cv.pdf").write_bytes(make_pdf())
         self.db = DB(":memory:")
+        authorize(self.db)
         self.db.upsert_postings([{"key": "a" * 16, "title": "T", "company": "C", "url": "https://x.example/job"},
                                  {"key": "b" * 16, "title": "T", "company": "C", "url": "ftp://x"}])
         self.srv = server.make_server(self.db, port=0)
@@ -531,7 +536,7 @@ class RouteBranches(TmpDetails):
                              "The browser step failed.")
         self.assertEqual(self.call("POST", "/api/apply/abcdefabcdef/answers", {"answers": ["x"]})[0], 400)
         # proof route: a recorded path outside the proofs folder is never served
-        self.db.app_set("a" * 16, "submitted", proof="/etc/passwd")
+        seed(self.db, "a" * 16, "submitted", proof="/etc/passwd")
         self.assertEqual(self.call("GET", f"/api/applications/{'a' * 16}/proof")[0], 404)
         self.assertFalse(server.job_url_ok("http://evil.example/x"))
         with mock.patch.object(config, "ALLOW_LOCAL_HTTP", True):

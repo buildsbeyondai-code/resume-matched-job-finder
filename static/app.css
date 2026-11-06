@@ -241,3 +241,9 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
   .uabar { border: 1px solid CanvasText; }
   .subtabs a[aria-current="page"] { border-bottom-color: Highlight; }
 }
+/* application policy */
+.policy-now { margin: 0; padding: 8px 12px; border-radius: 6px; background: var(--info-bg); color: var(--text); overflow-wrap: anywhere; }
+.policy-now[data-mode="AUTHORIZED_AUTO_SUBMIT"] { background: var(--warn-bg); color: var(--warn-text); }
+.check.radio { align-items: flex-start; margin: 6px 0; }
+.check.radio input { flex: none; margin-top: 3px; }
+.consent-text { padding: 10px 12px; border-left: 4px solid var(--primary); background: var(--surface-2); overflow-wrap: anywhere; }

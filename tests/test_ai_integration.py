@@ -47,7 +47,7 @@ class ClaudeAutoApply(base.AutoApplyIntegration):
         calls = self.calls()
         self.assertEqual(len(calls), 1)  # one call for the whole form
         prompt = calls[0]["prompt"]
-        for text in ("Senior AI Program Manager", "Greenhouse Corp", "- Current company: Contoso"):
+        for text in ("Senior AI Program Manager", "Greenhouse Corp", "Current company: Contoso"):
             self.assertIn(text, prompt)
         self.assertNotIn("First Name", prompt)  # questions resume_details.md answers are not sent
 

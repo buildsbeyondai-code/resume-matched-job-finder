@@ -8,7 +8,7 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import apply as applying, autoapply, config, details, portals, search, sources, unattended
+from . import ai, apply as applying, audit, autoapply, config, policy, details, portals, search, sources, unattended
 from .db import DB
 from .resume import ResumeError, parse_resume
 from .skills import canonical_skill
@@ -47,6 +47,7 @@ def settings_error(b):
 
 
 def make_handler(db: DB):
+    ai.configure(db)  # Claude usage log and daily budget
     runner = autoapply.Runner(db)
     ua = unattended.Unattended(db, runner)  # after the Runner: interrupted unattended jobs become Needs you
 
@@ -149,6 +150,19 @@ def make_handler(db: DB):
                 return self.send(200, run.snapshot()) if run else self.err(404, "Search not found")
             if path == "/api/applications":
                 return self.send(200, runner.snapshot())
+            if path == "/api/policy":
+                return self.send(200, policy.view(db))
+            if path == "/api/ai/usage":  # what Claude Code reported per call (list-price equivalent, not a bill)
+                rows = db.q("SELECT day, COUNT(*) AS calls, SUM(ok) AS ok, ROUND(SUM(cost_usd), 4) AS cost_usd, "
+                            "SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens FROM ai_usage "
+                            "GROUP BY day ORDER BY day DESC LIMIT 60")
+                return self.send(200, {"model": ai.MODEL, "prompt_version": ai.PROMPT_VERSION,
+                                       "daily_budget_usd": ai.DAILY_BUDGET_USD, "spent_today_usd": ai.spent_today(),
+                                       "days": [dict(r) for r in rows]})
+            if path == "/api/audit":
+                ok, n, head, broken = audit.verify(db)
+                return self.send(200, {"intact": ok, "events": n, "head": head, "broken_at": broken,
+                                       "recent": audit.events(db, limit=200)})
             if path == "/api/portals":
                 return self.send(200, applying.ASSISTANT.portal_status())
             m = re.fullmatch(r"/api/applications/([0-9a-f]{16})(/proof)?", path)
@@ -240,6 +254,14 @@ def make_handler(db: DB):
                         return self.err(400, "The request could not be read.")
                     answers = {str(k)[:20]: str(v)[:4000] for k, v in answers.items()}
                     return self.send(200, {**runner.answer(answers), **runner.snapshot()})
+                if path == "/api/policy/preview":
+                    out, errors = policy.preview_summary(db, self.body_json())
+                    return self.send(400, {"error": errors[0]["message"], "errors": errors}) if errors else self.send(200, out)
+                m = re.fullmatch(r"/api/applications/([0-9a-f]{16})/resolve", path)
+                if m:
+                    if not runner.resolve(m.group(1), self.body_json().get("outcome")):
+                        return self.err(409, "Only an application whose outcome is unknown can be recorded this way.")
+                    return self.send(200, runner.snapshot())
                 m = re.fullmatch(r"/api/applications/([0-9a-f]{16})/(retry|mark)", path)
                 if m:
                     ok = runner.retry(m.group(1)) if m.group(2) == "retry" else runner.mark_applied(m.group(1))
@@ -291,6 +313,9 @@ def make_handler(db: DB):
                         return self.err(400, "Add at least one skill.", "skills")
                     db.save_profile(list(dict.fromkeys(skills)), titles, years)
                     return self.send(200, {"profile": db.get_profile()})
+                if path == "/api/policy":
+                    out, errors = policy.update(db, b)
+                    return self.send(400, {"error": errors[0]["message"], "errors": errors}) if errors else self.send(200, out)
                 if path == "/api/settings":
                     bad = settings_error(b)  # validated first: on any error nothing is saved
                     if bad:
@@ -376,6 +401,8 @@ def make_handler(db: DB):
         def apply_call(self, fn, *args):
             try:
                 return self.send(200, fn(*args))
+            except policy.Blocked as e:
+                return self.err(409, str(e))
             except applying.ApplyError as e:
                 return self.err(422, str(e))
             except TimeoutError:

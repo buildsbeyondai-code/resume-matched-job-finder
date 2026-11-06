@@ -16,7 +16,7 @@ from pathlib import Path
 from app import apply, config, details, direct, server
 from app.db import DB
 from tests import fake_careers
-from tests.helpers import make_pdf
+from tests.helpers import make_pdf, authorize, GateHooks
 from tests.test_apply import _chromium_ok
 
 DETAILS = """# Resume details
@@ -39,8 +39,8 @@ DETAILS = """# Resume details
 """
 
 
-def job(key, url, title, company):
-    return {"key": key, "source": "Test", "source_id": key, "title": title, "company": company, "location": "Remote",
+def job(key, url, title, company, location="Remote"):
+    return {"key": key, "source": "Test", "source_id": key, "title": title, "company": company, "location": location,
             "url": url, "posted": "2026-11-01", "description": "", "countries": [], "mode": "remote", "skills": []}
 
 
@@ -65,6 +65,7 @@ class AutoApplyIntegration(unittest.TestCase):
             {"url": boards[company], "board": "Lever", "title": title, "score": 1.0} if company in boards else None)
         direct.careers_search_url = lambda company, title: cls.fake.url("/search")
         cls.db = DB(":memory:")
+        authorize(cls.db)  # these tests submit to the local fake careers web
         f = cls.fake.url
         cls.jobs = {
             "gh": job("a" * 16, f("/gh/1"), "Senior AI Program Manager", "Greenhouse Corp"),
@@ -74,9 +75,13 @@ class AutoApplyIntegration(unittest.TestCase):
             "signin": job("e" * 16, f("/signin/1"), "Lead", "Signin Corp"),
             "reject": job("f" * 16, f("/reject/1"), "Manager", "Closed Corp"),
             "nobutton": job("1" * 16, f("/nobutton/1"), "Analyst", "Odd Corp"),
-            "agg_land": job("2" * 16, f("/details/1", "localhost"), "Senior AI Program Manager", "Greenhouse Corp"),
+            # a second opening of the same role in another city (a different application from "gh")
+            "agg_land": job("2" * 16, f("/details/1", "localhost"), "Senior AI Program Manager", "Greenhouse Corp",
+                            "Hyderabad, India"),
             "agg_only": job("3" * 16, f("/details/2", "localhost"), "QA Engineer", "Agency Corp"),
-            "agg_board": job("4" * 16, f("/details/3", "localhost"), "AI Engineer", "Lever Corp"),
+            "agg_board": job("4" * 16, f("/details/3", "localhost"), "AI Engineer", "Lever Corp", "Bengaluru, India"),
+            # the Lever job again, reposted on the aggregator: the same application, never submitted twice
+            "agg_dup": job("6" * 16, f("/details/3", "localhost"), "AI Engineer", "Lever Corp"),
             "http_ext": job("5" * 16, "http://example.com/job", "Insecure", "Nope"),
         }
         cls.db.upsert_postings(list(cls.jobs.values()))
@@ -87,6 +92,9 @@ class AutoApplyIntegration(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        runner = getattr(cls.srv.RequestHandlerClass, "auto", None)
+        if runner is not None:  # a failed test must not leave jobs queued on the shared browser thread
+            runner.cancel()
         try:
             apply.ASSISTANT.call(lambda: apply.ASSISTANT.ctx and apply.ASSISTANT.ctx.close())
         except Exception:  # noqa: BLE001
@@ -134,7 +142,8 @@ class AutoApplyIntegration(unittest.TestCase):
         self.assertEqual(self.call("POST", f"/api/applications/{'9' * 16}/retry")[0], 409)
 
         # 1) batch: every kind of company site at once (the insecure external link is filtered out)
-        names = ["gh", "lever", "multi", "captcha", "signin", "reject", "nobutton", "agg_only", "agg_board", "http_ext"]
+        names = ["gh", "lever", "multi", "captcha", "signin", "reject", "nobutton", "agg_only", "agg_board", "agg_dup",
+                 "http_ext"]
         code, r = self.call("POST", "/api/autoapply", {"keys": [self.key(n) for n in names]})
         self.assertEqual(code, 202)
         self.assertNotIn(self.key("http_ext"), r["queued"])
@@ -142,7 +151,9 @@ class AutoApplyIntegration(unittest.TestCase):
         st = {n: apps[self.key(n)]["status"] for n in names if self.key(n) in apps}
         self.assertEqual(st, {"gh": "needs_answers", "lever": "submitted", "multi": "needs_answers",
                               "captcha": "needs_you", "signin": "needs_you", "reject": "failed",
-                              "nobutton": "needs_you", "agg_only": "no_company_site", "agg_board": "submitted"})
+                              "nobutton": "needs_you", "agg_only": "no_company_site", "agg_board": "submitted",
+                              "agg_dup": "policy_blocked"})
+        self.assertIn("another posting of the same job", apps[self.key("agg_dup")]["reason"])
 
         # what Lever Corp received: full name, email, years, current company and the resume file
         lever = fake_careers.fields(self.fake.submissions["lever"])

@@ -24,7 +24,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import autoapply, config, direct, search
+from . import autoapply, config, direct, policy, search
 
 KEY = "unattended"  # settings row holding this feature's settings and state
 DEFAULTS = {
@@ -49,7 +49,8 @@ LIMITS = {  # field: (min, max, message); messages say how to fix the problem (I
 AUTO_PAUSE_AFTER = 3  # run-level errors in a row (S1); 0 would mean never
 INTERRUPTED = "Interrupted, check whether it was submitted"
 DONE = ("submitted", "applied_manually")
-OPEN_APP = ("needs_you", "needs_answers", "failed", "cancelled", "no_company_site")  # still waiting for the user
+OPEN_APP = ("needs_you", "needs_answers", "failed", "cancelled", "no_company_site", "outcome_unknown",
+            "ready_for_review", "policy_blocked")  # still waiting for the user
 STATUS_WORDS = {"queued": "queued", "running": "applying now", "needs_answers": "needs your answers",
                 "needs_you": "needs you", "no_company_site": "no company website", "failed": "failed",
                 "cancelled": "cancelled", "dismissed": "dismissed"}
@@ -82,7 +83,7 @@ def hhmm(ts):
 
 
 def search_id(params_json):
-    return hashlib.sha1(params_json.encode()).hexdigest()[:12]
+    return hashlib.sha1(params_json.encode(), usedforsecurity=False).hexdigest()[:12]
 
 
 def search_label(params):
@@ -334,6 +335,9 @@ class Unattended:
             reason = "paused"
         elif in_quiet(now, s["quiet_start"], s["quiet_end"]):
             reason = "quiet hours"
+        elif not dry and policy.effective_mode(policy.load(self.db), now) != policy.AUTO:
+            reason = ("automatic submission is not authorized (Settings, Application policy: "
+                      "choose \"Submit automatically\" and confirm its scope)")
         elif not dry and self.submitted_today(now) >= s["daily_cap"]:
             reason = "daily cap reached"
         elif not s["searches"]:
@@ -557,7 +561,7 @@ class Unattended:
                 _owner_only(Path(proof))
                 return "submitted", a.get("confirmation") or "Confirmation page shown", proof
             reason = "Confirmation seen, but the proof screenshot could not be saved. Check the application."
-            self.db.app_set(key, "needs_you", reason=reason)
+            self.db.app_set(key, "outcome_unknown", reason=reason)  # never retried; the user records it
             return "needs_you", reason, None
         if st == "needs_answers":
             qs = "; ".join(q.get("label", "").rstrip(" *✱") for q in a.get("missing", []))
@@ -643,8 +647,10 @@ class Unattended:
         r = self.db.q("SELECT key FROM ua_jobs WHERE id=? AND outcome='needs_you'", (job_id,))
         if not r:
             return False
-        self.db.x("UPDATE ua_jobs SET resolved=1 WHERE key=? AND outcome='needs_you'", (r[0]["key"],))
         a = self.db.app_get(r[0]["key"])
+        if a and a["status"] == "outcome_unknown":
+            return False  # an unknown outcome is recorded, not dismissed (Applications: "It was sent" / "Not sent")
+        self.db.x("UPDATE ua_jobs SET resolved=1 WHERE key=? AND outcome='needs_you'", (r[0]["key"],))
         if a and a["status"] in OPEN_APP:
             self.db.app_set(r[0]["key"], "dismissed", reason="Dismissed by you.")
         return True

@@ -195,13 +195,16 @@ class DB:
         return d
 
     def app_set(self, key, status, **data):
-        cur = self.app_get(key) or {}
-        cur.update(data)
-        for k in ("key", "status", "updated"):
-            cur.pop(k, None)
-        self.x("INSERT OR REPLACE INTO applications(key,status,data,updated) VALUES(?,?,?,?)",
-               (key, status, json.dumps(cur), time.time()))
-        return self.app_get(key)
+        from .states import check
+        with self.lock:  # check and write as one step
+            cur = self.app_get(key) or {}
+            check(cur.get("status"), status)  # the application state machine (app/states.py)
+            cur.update(data)
+            for k in ("key", "status", "updated"):
+                cur.pop(k, None)
+            self.x("INSERT OR REPLACE INTO applications(key,status,data,updated) VALUES(?,?,?,?)",
+                   (key, status, json.dumps(cur), time.time()))
+            return self.app_get(key)
 
     def app_list(self):
         out = []
@@ -228,9 +231,11 @@ class DB:
     def delete_all(self):
         with self.lock:
             for t in ("profile", "postings", "searches", "job_state", "http_cache", "settings", "applications",
-                      "ua_runs", "ua_jobs"):
-                self.conn.execute(f"DELETE FROM {t}")
+                      "ua_runs", "ua_jobs", "submissions", "audit", "ai_usage"):
+                self.conn.execute(f"DELETE FROM {t}")  # noqa: S608 - table names are the constants above
             self.conn.commit()
+        from . import audit  # a fresh chain starts with the deletion itself (no personal data in it)
+        audit.record(self, "data.deleted_all", data={})
         self.reset_sources()
         with self.lock:
             self.conn.execute("VACUUM")

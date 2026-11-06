@@ -16,10 +16,12 @@ import secrets
 import threading
 from concurrent.futures import Future
 
-from . import ai, config, details, direct, portals
+from . import ai, config, details, direct, policy, portals
 
 APPLY_RE = (r"^\s*(apply|apply now|apply for this (job|position|role)|apply online|apply to this job|"
             r"easy apply( to .+)?|i'?m interested|start (your )?application|submit (an )?application)\s*[›»>→]?\s*$")
+# may end an application on some sites (a Naukri chat drawer's last "Save" sends it)
+AMBIGUOUS_RE = re.compile(r"^\s*(continue|proceed|save)\s*[›»>→]?\s*$", re.I)
 COMPANY_SITE_RE = r"^\s*apply (on|at|via) (the )?company('?s)? (site|website|career site)\s*[›»>→↗]?\s*$"
 TEXTISH = {"text", "email", "tel", "url", "number", "textarea", "combobox", "date"}
 
@@ -234,7 +236,7 @@ def convert(f, value):
 
 
 def ai_actions(fields, missing, got):
-    """Turn Claude's answers ({id: (value, basis)}) into fill actions.
+    """Turn Claude's answers ({id: (value, basis, fact ids, confidence)}) into fill actions.
     Returns (actions, still_missing, used): used = [{label, value, basis}] shown to the user."""
     by_id = {f["id"]: f for f in fields}
     actions, rest, used = [], [], []
@@ -244,7 +246,8 @@ def ai_actions(fields, missing, got):
         if how == "bad":
             rest.append(q)
             continue
-        used.append({"label": q["label"], "value": a[0], "basis": a[1]})
+        used.append({"label": q["label"], "value": a[0], "basis": a[1],
+                     "fact_ids": list(a[2]) if len(a) > 2 else [], "confidence": a[3] if len(a) > 3 else None})
         if how == "fill":
             actions.append((f, v))
     return actions, rest, used
@@ -554,6 +557,23 @@ class Assistant:
         if fn is not None:
             fn(*args)
 
+    @staticmethod
+    def _gate(job, what, channel):
+        """Ask the application policy before a click that may send the application (Submit, a portal's Apply,
+        an ambiguous "Continue"). Fails closed: without a gate (no runner hooks) nothing is ever sent."""
+        fn = getattr(job.get("hooks"), "before_submit", None)
+        if fn is None:
+            raise policy.Blocked("Ready for your review: the form is filled. Press Submit in the browser window "
+                                 "yourself.", "ready_for_review")
+        fn(what, channel)
+
+    @staticmethod
+    def _after(job, outcome, **detail):
+        """Report what a gated click did: submitted | not_submitted | unknown (the runner records it)."""
+        fn = getattr(job.get("hooks"), "after_submit", None)
+        if fn is not None:
+            fn(outcome, detail)
+
     def _blocked(self, page):
         """'sign-in' or 'captcha' when the page is a wall the app must not touch, else ''."""
         has_pw = any(r for _fr, r in self._eval_all(page, PASSWORD_JS, False))
@@ -591,11 +611,19 @@ class Assistant:
         self.portal_state[key] = True
         job_url, before_text = page.url, self._text(page)
         self._hook(job, "step", f"Pressing Apply on {name}")
+        btn = self._apply_button(page)
+        gated = btn is not None and not re.match(COMPANY_SITE_RE, (btn.inner_text() or "").strip(), re.I)
+        if gated:  # a portal's Apply can send the application at once (Naukri one-click Apply)
+            self._gate(job, f"Apply on {name}", key)
+        after = self._after if gated else (lambda *a, **k: None)  # outcomes are reported only for a gated click
         page = self._find_form(page, force=True)  # "Apply on company site" first, else Apply / Easy Apply
         if page.url.split("#")[0] != job_url.split("#")[0] and portals.portal_of(page.url) is None:
+            after(job, "not_submitted", why="moved to the company website")
             return "company", f"{name}'s link to the company website", self._find_form(page)
         if confirmed(before_text, self._text(page), job_url, page.url):
+            after(job, "submitted", why=f"{name} confirmed the one-click Apply")
             return "applied", name, page
+        after(job, "not_submitted", why="Apply opened the next step")  # a form, dialog or sign-in: nothing sent
         wall = self._blocked(page)
         if wall:
             return "blocked", self._wall(key, wall), page
@@ -714,9 +742,13 @@ class Assistant:
         return str(path)
 
     def _auto(self, job, max_steps=8):
-        """Apply to one job end to end. Returns a status dict:
-        submitted | needs_answers | needs_you | no_company_site | failed."""
-        r = self._open(job)
+        """Apply to one job end to end. Returns a status dict: submitted | needs_answers | needs_you |
+        no_company_site | failed | ready_for_review | policy_blocked | outcome_unknown."""
+        try:
+            r = self._open(job)
+        except policy.Blocked as e:  # stopped before a portal's Apply click
+            return {"session": None, "status": e.status, "reason": str(e), "channel": None, "via": None, "url": "",
+                    "site": "", "title": job.get("title"), "company": job.get("company"), "ai": [], "ai_error": ""}
         s = self.sessions[r["session"]]
         channel = r.get("channel", "company")
         portal = portals.PORTALS.get(channel, {}).get("name")  # None on the company's own site
@@ -764,10 +796,20 @@ class Assistant:
                 return done("needs_you", reason="No Submit button was found on the form.")
             fr, b = pick
             self._hook(job, "before_click", b["kind"])  # unattended mode: never press Submit when paused or in quiet hours
+            risky = b["kind"] == "submit" or AMBIGUOUS_RE.match(b["text"] or "") is not None
+            if risky:
+                try:
+                    self._gate(job, b["text"], channel)
+                except policy.Blocked as e:
+                    return done(e.status, reason=str(e))
             before_text, before_url = self._text(s.page), s.page.url
             try:
                 fr.locator(f'[data-rmjf-btn="{b["id"]}"]').first.click(timeout=5000)
             except Exception:  # noqa: BLE001
+                if risky:  # the click may still have reached the site: never assume it did not
+                    self._after(job, "unknown", why="the click failed")
+                    return done("outcome_unknown", reason=f"The {b['text']} button may not have been pressed. Check in "
+                                                          "the browser window whether the application was sent.")
                 return done("needs_you", reason=f"The {b['text']} button could not be clicked.")
             s.page.wait_for_timeout(1200)
             self._settle(s.page)
@@ -776,13 +818,26 @@ class Assistant:
                 s.page = pages[-1]
             pressed += 1
             if confirmed(before_text, self._text(s.page), before_url, s.page.url):
+                # a click that was not gated still sent it: recorded and flagged, never hidden
+                self._after(job, "submitted" if risky else "submitted_ungated", why="confirmation shown",
+                            button=b["text"][:60])
                 return submitted()
             if self._captcha(s.page):
+                if risky:
+                    self._after(job, "unknown", why="CAPTCHA after Submit")
+                    return done("outcome_unknown", reason="A CAPTCHA appeared after Submit. Solve it in the browser "
+                                                          "window, then record whether the application was sent.")
                 return done("needs_you", reason="A CAPTCHA appeared after Submit. Solve it in the browser window.")
             errs = self._errors(s.page)
-            if portal and b["kind"] == "submit" and not errs:  # never press a portal's Submit twice
-                return done("needs_you", reason=f"Confirmation not found: {portal} showed no confirmation after "
-                                                f"{b['text']}. Open the job in the browser to check it.")
+            if risky and errs:  # the site rejected the form and shows why: it was not sent
+                self._after(job, "not_submitted", why="validation errors shown")
+            elif risky and b["kind"] != "submit" and any(f["kind"] != "file" for f in self._scan(s.page)):
+                self._after(job, "not_submitted", why="the next step of the form opened")
+            elif risky:  # no confirmation and no errors: it may or may not have been sent; never press it again
+                self._after(job, "unknown", why="no confirmation")
+                return done("outcome_unknown", reason=f"Confirmation not found after {b['text']} on "
+                                                      f"{portal or s.page.url.split('/')[2]}. Check in the browser "
+                                                      "window whether the application was sent, then record it.")
             if b["kind"] == "submit" and errs:
                 submits_with_errors += 1
                 if submits_with_errors >= 2:

@@ -58,7 +58,7 @@ class Server(unittest.TestCase):
         for name, kw in cases.items():
             with self.subTest(name):
                 self.assertEqual(self.req(*write, **kw)[0], 403)
-        for method, path in (("POST", "/api/autoapply"), ("DELETE", "/api/data"), ("POST", "/api/policy/consent")):
+        for method, path in (("POST", "/api/autoapply"), ("DELETE", "/api/data"), ("PUT", "/api/policy")):
             with self.subTest(path=path):
                 self.assertEqual(self.req(method, path, {}, std=False)[0], 403)
         self.assertEqual(self.db.settings()["min_score"], 41)  # none of the forged writes changed anything
@@ -77,7 +77,13 @@ class Server(unittest.TestCase):
         self.assertEqual((code, r["status"], r["schema"]), (200, "ready", SCHEMA_VERSION))
         broken = DB(":memory:")
         srv = server.make_server(broken, port=0)
-        broken.conn.close()  # the database goes away while the app runs
+        real_q = broken.q
+
+        def failing_q(sql, args=()):  # the database stops answering (never close a connection other threads use)
+            if sql == "SELECT 1":
+                raise sqlite3.OperationalError("disk I/O error")
+            return real_q(sql, args)
+        broken.q = failing_q
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         try:
             r = urllib.request.Request(f"http://127.0.0.1:{srv.server_address[1]}/readyz")

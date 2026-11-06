@@ -15,6 +15,7 @@ from unittest import mock
 
 from app import apply, autoapply, config, portals, server
 from app.db import DB
+from tests.helpers import seed
 
 
 class PortalRules(unittest.TestCase):
@@ -136,7 +137,7 @@ class SettingsAndRoutes(unittest.TestCase):
             self.assertEqual(self.call("POST", "/api/portals/naukri/signin")[1], {"opened": "Naukri"})
             si.assert_called_once_with("naukri")
             self.db.upsert_postings([{"key": "b" * 16, "title": "T", "company": "C", "url": "https://x/1"}])
-            self.db.app_set("b" * 16, "queued", queued_at=1)  # a run is active: the browser is not lent out
+            seed(self.db, "b" * 16, "queued", queued_at=1)  # a run is active: the browser is not lent out
             self.assertEqual(self.call("POST", "/api/portals/linkedin/signin")[0], 409)
         code, d = self.call("POST", "/api/autoapply/cancel")
         self.assertEqual((code, d["cancelled"]), (200, 1))
