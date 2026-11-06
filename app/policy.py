@@ -30,7 +30,7 @@ DEFAULTS = {
     "mode": SEARCH_ONLY,
     "excluded_companies": [],  # never apply to these employers
     "daily_cap": 10,           # submissions per local day, all channels
-    "channels": ["company", "naukri", "linkedin"],  # where Submit may be pressed (portals also need Settings on)
+    "channels": ["company"],  # where Submit may be pressed; Naukri/LinkedIn are opt-in (PORTAL_POLICY_MATRIX.md)
     "expires_days": 30,        # consent lifetime
     "consent": None,           # {at, expires, summary, summary_hash, mode}; None = never given or revoked
 }

@@ -15,7 +15,7 @@ Candidate facts always win. Claude only sees questions the details file couldn't
 - `claude -p --model claude-opus-5-5 --tools "" --setting-sources "" --no-session-persistence --output-format json --max-budget-usd 1.00 --json-schema <schema>`.
 - It runs in an empty temporary working directory, with the prompt on stdin and the user's own Claude Code sign-in. No API key is stored by the app.
 - **Model check.** The `modelUsage` keys in the reply must include `RMJF_AI_MODEL`, or the answers are discarded with an error. There is no silent fallback. Changing the model needs the user to set `RMJF_AI_MODEL`.
-- **Verified identifier.** On 2026-11-06 a live call through Claude Code 2.1.318 returned `modelUsage` = `{"claude-opus-5-5": …}`, about 11 s for 6 questions. That ran an earlier prompt version (`answers-2026-11-06.1`). **The current prompt version `answers-2026-11-06.2` has NOT been run live** (NEEDS_USER: a paid call).
+- **Verified identifier.** On 2026-11-06 a live call through Claude Code 2.1.318 returned `modelUsage` = `{"claude-opus-5-5": …}`, about 11 s for 6 questions. That ran an earlier prompt version (`answers-2026-11-06.1`). The current prompt version `answers-2026-11-06.2` was evaluated live with the user's approval on a fictional candidate (`tools/ai_eval.py`, results in AI_EVAL_RESULTS.md): 3 calls, `claude-opus-5-5` confirmed, **33/33 checks passed**, reported cost $0.18.
 
 ## Output contract (enforced in code)
 - The schema is `{answers: [{id, value|null, fact_ids[], confidence, basis}]}`.
@@ -40,7 +40,8 @@ Candidate facts always win. Claude only sees questions the details file couldn't
   - only listed question ids are used;
   - answers must cite real facts;
   - Claude has no tools.
-- The worst case left is a misleading free-text answer, which is shown to the user. **A live injection evaluation is NOT VERIFIED.**
+- The worst case left is a misleading free-text answer, which is shown to the user.
+- **Live injection evaluation:** 3 attack placements were tested (job description, question label, option text). Opus 5.5 ignored all of them in its raw output, and the app's checks would also have caught them (AI_EVAL_RESULTS.md). This is a small sample, not a guarantee.
 
 ## Reliability and cost
 - **Timeout:** 180 s per call. A timeout is not retried.

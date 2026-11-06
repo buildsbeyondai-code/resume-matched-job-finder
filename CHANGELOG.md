@@ -4,6 +4,7 @@
 **Breaking:** applications are no longer filled or sent until you choose a mode in Settings → Application policy. The default after upgrading is **Search only**.
 
 ### Safety: authorization and duplicates
+- Automatic submission is allowed only on company websites by default. Naukri and LinkedIn must be added to the policy on purpose (their terms restrict automation).
 - Application policy with three modes: Search only, Prepare for review, Submit automatically. Automatic submission needs you to confirm the exact scope (daily cap, channels, excluded employers, lifetime). The consent expires, and it ends when the scope changes.
 - One deterministic gate before every click that may send an application. That covers Submit, a portal's Apply (one-click), and an ambiguous Continue, Proceed or Save. It fails closed.
 - Submission keys (employer + role + location) are claimed in a transaction. The same job through another board is never sent twice, and neither is the same job retried.

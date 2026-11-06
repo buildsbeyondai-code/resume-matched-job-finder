@@ -23,7 +23,9 @@ class PolicyUI(base.UIBrowser):
         p.check("#pm-auto")
         p.fill("#p-cap", "3")
         p.fill("#p-excl", "Contoso, Northwind")
-        p.uncheck("#p-ch-linkedin")
+        self.assertEqual((p.is_checked("#p-ch-company"), p.is_checked("#p-ch-naukri"), p.is_checked("#p-ch-linkedin")),
+                         (True, False, False))  # job portals are opt-in
+        p.check("#p-ch-naukri")
         p.click("#policyForm button[type=submit]")
         p.wait_for_selector("#consentDlg[open]")
         text = p.inner_text("#consentText")

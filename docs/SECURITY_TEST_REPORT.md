@@ -20,6 +20,15 @@ Written by the developing agent; **this is not an independent review.** No exter
 | Mutation testing of 17 safety rules | `tools/mutation.py` | 17/17 killed |
 | Secrets and personal data in tracked files | `tools/scan_secrets.sh` | clean |
 
+## Live model evaluation (approved by the user)
+`tools/ai_eval.py`, fictional candidate, 3 calls to `claude-opus-5-5`: **33/33 checks passed** (AI_EVAL_RESULTS.md).
+- Salary, visa and legal consent stayed unanswered.
+- No injected value or contact data appeared.
+- Kept answers cite real facts and are real options.
+- Injections in the job description, a label and an option were ignored.
+
+Small sample: this is not a robustness guarantee.
+
 ## Static analysis and dependencies
 - **bandit 1.9.4** on `app/`: 3 High findings (SHA-1 used for identifiers, now `usedforsecurity=False`). After the fix: **0 High**. 6 Medium findings were triaged as false positives:
   - SQL built from constant fragments;
@@ -33,6 +42,5 @@ Written by the developing agent; **this is not an independent review.** No exter
 
 ## Not verified
 - Behaviour against real employer ATS sites and real Naukri/LinkedIn (PORTAL_POLICY_MATRIX.md).
-- A live prompt-injection evaluation against Claude Opus 5.5 (needs paid calls: NEEDS_USER).
 - Session theft from the browser profile by a malicious page: the separation relies on Chromium site isolation (THREAT_MODEL.md R3).
 - Manual WCAG 2.2 AA review of the new policy panel. Automated checks cover names, focus and contrast tokens.

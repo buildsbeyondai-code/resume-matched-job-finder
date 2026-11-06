@@ -10,7 +10,7 @@ The app sends applications in the user's name. An application can't be recalled,
 | `AUTHORIZED_AUTO_SUBMIT` | fills forms | yes, inside the confirmed scope until the consent expires | |
 
 ## Granting automatic submission
-1. In Settings → Application policy, the user chooses "Submit automatically" and the limits: the daily cap (1–100), the permission lifetime (1–365 days), excluded employers, and the channels (company sites, Naukri, LinkedIn).
+1. In Settings → Application policy, the user chooses "Submit automatically" and the limits: the daily cap (1–100), the permission lifetime (1–365 days), excluded employers, and the channels. Company websites are allowed by default; Naukri and LinkedIn must be ticked on purpose, after you have reviewed their terms (PORTAL_POLICY_MATRIX.md).
 2. The UI asks the server for the **exact summary sentence** for that scope (`POST /api/policy/preview`) and shows it in a dialog.
 3. "I allow this" sends the scope together with the SHA-256 of the summary that was shown (`PUT /api/policy`, field `confirm`). The server recomputes the summary and refuses the change unless the hashes match. A scope the user didn't see can't be saved.
 4. The consent `{at, expires, summary, summary_hash}` is stored, and `consent.granted` is written to the audit log.

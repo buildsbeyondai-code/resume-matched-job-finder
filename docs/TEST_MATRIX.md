@@ -20,7 +20,7 @@ Commands (run from the repo root):
 | Greenhouse / Lever forms | test_apply, test_apply_branches | — | test_autoapply_integration, test_unattended_browser | **NOT VERIFIED** |
 | SmartRecruiters / Ashby / Workable | test_direct (lookup), test_unit (adapters) | — | **no form fixture (gap)** | **NOT VERIFIED** |
 | Naukri / LinkedIn (synthetic) | test_portals_unit | — | test_portals_integration (one-click, drawer, Easy Apply, walls, CAPTCHA, unknown outcome) | **NOT VERIFIED** |
-| Claude answers | test_ai (fake CLI: citations, minimisation, fencing, model check, retries, budget) | — | test_ai_integration | one live call on the earlier prompt version; current version NOT VERIFIED |
+| Claude answers | test_ai (fake CLI: citations, minimisation, fencing, model check, retries, budget) | — | test_ai_integration | `tools/ai_eval.py`: 3 live calls, 33/33 checks (AI_EVAL_RESULTS.md) |
 | Resume parsing | test_unit | test_properties (300 mutated files, bombs) | — | — |
 | Server security, health, migrations | test_security, test_integration | test_properties (URLs) | — | — |
 | UI | test_ui_static (names, contrast tokens, one primary action, no innerHTML) | — | test_ui_browser, test_unattended_ui, test_policy_ui | manual WCAG review NOT VERIFIED |

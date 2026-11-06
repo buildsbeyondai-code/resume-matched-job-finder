@@ -24,9 +24,9 @@ Branch `v2-enterprise-hardening` was created from `7689edd`, the recovered local
 5. Test isolation: a failed portal test left jobs queued on the shared browser thread, which hung the later modules. Teardown now cancels the queue.
 
 ## Blockers / NEEDS_USER
-- **Push / PR:** needs the user's permission. The GitHub token may also need the `workflow` scope to push `.github/workflows/ci.yml`.
+- **Push:** approved by the user ("push to main branch"); merged to `master` and pushed.
 - **Live verification** of ATS sites and portals: needs explicit authorization and non-submitting test accounts or sandboxes.
-- **Live Claude evaluation** (prompt injection, answer faithfulness) on prompt version `answers-2026-11-06.2`: paid calls, so the user must approve them.
+- ~~Live Claude evaluation~~: done with the user's approval (33/33, AI_EVAL_RESULTS.md).
 - **Legal review** of Naukri and LinkedIn automation terms, and DPDP/GDPR, by the user or counsel.
 - **Container build:** no Docker or Podman on this machine.
 

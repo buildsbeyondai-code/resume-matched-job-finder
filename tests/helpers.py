@@ -84,7 +84,7 @@ def authorize(db, **scope):
     """Grant automatic submission the way the user does in Settings: preview the summary, confirm its hash.
     Tests that expect applications to be submitted call this; everything else runs under the SEARCH_ONLY default."""
     from app import policy
-    body = {"mode": policy.AUTO, **scope}
+    body = {"mode": policy.AUTO, "channels": ["company", "naukri", "linkedin"], **scope}  # tests opt in to all
     prev, errors = policy.preview_summary(db, body)
     assert not errors, errors
     out, errors = policy.update(db, dict(body, confirm=prev["summary_hash"]))
