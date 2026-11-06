@@ -1,0 +1,92 @@
+{
+ "bomFormat": "CycloneDX",
+ "specVersion": "1.5",
+ "version": 1,
+ "metadata": {
+  "timestamp": "2026-11-06T11:50:21Z",
+  "tools": [
+   {
+    "vendor": "ReuseFirst",
+    "name": "reusefirst-gates"
+   }
+  ],
+  "component": {
+   "type": "application",
+   "name": "resume-matched-job-finder"
+  }
+ },
+ "components": [
+  {
+   "type": "library",
+   "name": "coverage",
+   "version": "7.17.2",
+   "purl": "pkg:pypi/coverage@7.17.2",
+   "properties": [
+    {
+     "name": "reusefirst:source",
+     "value": "installed"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "greenlet",
+   "version": "3.5.6",
+   "purl": "pkg:pypi/greenlet@3.5.6",
+   "properties": [
+    {
+     "name": "reusefirst:source",
+     "value": "installed"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "playwright",
+   "version": "1.64.1",
+   "purl": "pkg:pypi/playwright@1.64.1",
+   "properties": [
+    {
+     "name": "reusefirst:source",
+     "value": "installed"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pyee",
+   "version": "14.0.0",
+   "purl": "pkg:pypi/pyee@14.0.0",
+   "properties": [
+    {
+     "name": "reusefirst:source",
+     "value": "installed"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pypdf",
+   "version": "6.21.4",
+   "purl": "pkg:pypi/pypdf@6.21.4",
+   "properties": [
+    {
+     "name": "reusefirst:source",
+     "value": "installed"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "typing_extensions",
+   "version": "4.16.0",
+   "purl": "pkg:pypi/typing_extensions@4.16.0",
+   "properties": [
+    {
+     "name": "reusefirst:source",
+     "value": "installed"
+    }
+   ]
+  }
+ ]
+}

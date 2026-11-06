@@ -39,7 +39,7 @@ PORTAL_PAUSE_RANGE = (5, 600)  # seconds between portal applications (rate limit
 DEFAULTS = {
     "fallback_portals": ["naukri", "linkedin"],
     "portal_pause_s": 20,
-    "ai_answers": True,  # Claude Opus 5.5 answers questions resume_details.md can't (app/ai.py, D40)
+    "ai_answers": True,  # Claude Opus 5.5 answers questions resume_details.md can't (app/ai.py, D54)
     "countries": ["India", "United States", "United Kingdom", "Germany"],
     "mode": "remote",
     "max_age_days": 30,

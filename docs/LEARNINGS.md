@@ -26,3 +26,9 @@
 - Playwright can't `fill()` letters into `<input type=number>`. Browsers report typed letters as "", which is what the UI validates.
 - Existing end-to-end tests ran with the new "portals on by default" setting and would have contacted the real Naukri. Test mode must exclude any non-loopback portal (D35).
 - Multi-step forms can reveal new required questions only on their last page, so auto apply may need two rounds of questions for one job. Answers are saved, so this happens only once.
+- Unattended mode (2026-11-06):
+  - To get "exactly one catch-up run after downtime", the tick itself moves `last_tick` to now *before* starting the run. Next due = `last_tick` + interval, so any number of missed intervals produces one late tick.
+  - The existing apply hooks (`before_action`, `before_click`) were the right seam for the kill switch and quiet hours. They already run before every Playwright action, so pausing needs no change to the apply flows. Raising `Cancelled` there maps to "Interrupted, check whether it was submitted".
+  - A company-site CAPTCHA is detected after the visible fields are filled, but before any button is clicked. "Nothing typed into the CAPTCHA" holds (the frame is never touched), but the name and email fields of that form were typed into. That is acceptable, because nothing is submitted.
+  - Tests control time through an injectable `clock` (`self.ua.clock`). That made quiet hours at 23:10 and "the next day" deterministic without patching `time`.
+  - A test that asserts "a later run skips it" passes trivially when the later run has no candidates at all. Re-offer the jobs (here, as deferred rows) so the guard is actually exercised.

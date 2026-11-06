@@ -199,3 +199,45 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .ai-used summary { cursor: pointer; color: var(--primary); min-height: 24px; }
 .ai-used ul { margin: 6px 0 0; padding-left: 20px; }
 .ai-used li { margin: 2px 0; overflow-wrap: anywhere; }
+
+/* unattended auto-apply: status bar (kill switch on every view), Applications sub-tabs, summary and run log.
+   Only existing token pairs are used, so the contrast tests cover them in both themes. Status is always text + icon. */
+.uabar { display: flex; align-items: center; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap;
+  padding: 2px 20px; background: var(--surface); color: var(--text); border-bottom: 1px solid var(--border);
+  border-left: 4px solid var(--border-strong); font-size: 0.875rem; }
+.uabar[data-mode="running"] { background: var(--info-bg); border-left-color: var(--primary); }
+.uabar[data-mode="paused"] { background: var(--warn-bg); color: var(--warn-text); border-left-color: var(--warn-text); }
+.uabar[data-mode="paused"] .btn.text { color: var(--warn-text); }
+.uabar-text { margin: 0; overflow-wrap: anywhere; font-weight: 600; min-width: 0; }
+.ua-icon { display: inline-block; min-width: 1.25em; }
+#uaBanner { margin: 8px 20px 0; }
+.subtabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: -4px 0 12px; overflow-x: auto; }
+.subtabs a { color: var(--nav-text); text-decoration: none; padding: 8px 10px; border-bottom: 3px solid transparent;
+  font-weight: 550; white-space: nowrap; min-height: 24px; }
+.subtabs a:hover { border-bottom-color: var(--border-strong); }
+.subtabs a[aria-current="page"] { border-bottom-color: var(--primary); color: var(--text); }
+.plainset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.plainset:disabled .check, .plainset:disabled label { color: var(--muted); }
+.checks { display: grid; gap: 4px; }
+.checks .check { align-items: flex-start; font-weight: 500; overflow-wrap: anywhere; }
+.checks .check input { flex: none; margin-top: 2px; }
+.day-row { margin: 8px 0; }
+.field-label { font-weight: 600; font-size: 0.875rem; }
+.skeleton { display: grid; gap: 8px; margin: 12px 0; }
+.skeleton span { display: block; height: 18px; border-radius: 4px; background: var(--surface-2); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .55; } }
+.sum-group { margin: 16px 0; }
+.chip.oc-submitted, .chip.sum-applied { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+.chip.oc-needs_you, .chip.sum-needs_you { background: var(--warn-bg); color: var(--warn-text); }
+.chip.oc-skipped, .chip.oc-deferred, .chip.oc-preview, .chip.oc-attempting, .chip.sum-skipped { background: var(--surface-2); color: var(--text); }
+.run-jobs > td { background: var(--surface-2); padding: 8px; }
+@media (max-width: 720px) {
+  .uabar { padding-left: 12px; padding-right: 12px; }
+  #uaBanner { margin-left: 12px; margin-right: 12px; }
+  .table.stack td[data-label]::before { content: attr(data-label) ": "; font-weight: 650; color: var(--muted); }
+  .run-jobs > td { padding: 4px; }
+}
+@media (forced-colors: active) {
+  .uabar { border: 1px solid CanvasText; }
+  .subtabs a[aria-current="page"] { border-bottom-color: Highlight; }
+}

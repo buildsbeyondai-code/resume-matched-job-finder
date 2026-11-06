@@ -3,7 +3,7 @@
 Called during Apply and Auto apply, after the details file has filled what it can. Claude sees the
 question list (with each field's options), the job, resume_details.md and the resume text. It answers only
 what those facts support and returns null for the rest. A null answer, an error or a timeout leaves the
-question for the user ("Needs your answers"), so nothing is guessed. See docs/DECISIONS.md D40.
+question for the user ("Needs your answers"), so nothing is guessed. See docs/DECISIONS.md D54.
 
 Claude is reached through the Claude Code CLI (`claude -p`) with the user's own sign-in, no API key, no
 tools, and structured output (`--json-schema`). In test mode (RMJF_ALLOW_LOCAL_HTTP=1) it runs only when

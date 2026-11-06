@@ -24,8 +24,9 @@ def normalise_params(raw: dict, settings: dict) -> dict:
 
 
 class SearchRun:
-    def __init__(self, db, params, profile, level):
+    def __init__(self, db, params, profile, level, fresh=False):
         self.id = uuid.uuid4().hex[:12]
+        self.fresh = fresh  # unattended runs re-fetch every source instead of using the 1 h cache
         self.db, self.params, self.profile, self.level = db, params, profile, level
         self.cancel = threading.Event()
         self.started = time.time()
@@ -45,7 +46,7 @@ class SearchRun:
                 raise sources.SourceError("Unknown source type")
             out = []
             for url in adapter.urls(src, self.params):
-                body = sources.http_get(url, self.db, self.cancel)
+                body = sources.http_get(url, self.db, self.cancel, fresh=self.fresh)
                 out.extend(adapter.parse(body, src))
             with self.lock:
                 self.status[sid].update(state="done", count=len(out))
@@ -108,10 +109,10 @@ def finalize(db, raw, params, profile, level, failed):
     return {"params": params, "count": len(merged), "failed": failed}
 
 
-def start(db, raw_params, sync=False):
+def start(db, raw_params, sync=False, fresh=False):
     settings = db.settings()
     params = normalise_params(raw_params, settings)
-    run = SearchRun(db, params, db.get_profile(), settings.get("seniority", "mid"))
+    run = SearchRun(db, params, db.get_profile(), settings.get("seniority", "mid"), fresh)
     RUNS[run.id] = run
     if sync:
         run.run()

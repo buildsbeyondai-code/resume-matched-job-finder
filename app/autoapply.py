@@ -33,13 +33,17 @@ class _Hooks:
     def __init__(self, runner, key):
         self.runner, self.key, self.used_portal = runner, key, False
 
-    def step(self, text):
+    def check(self):
+        """Raise Cancelled when the run must stop (unattended mode adds pause and quiet hours)."""
         self.runner.check_cancel()
+
+    def step(self, text):
+        self.check()
         self.runner.db.app_set(self.key, "running", step=text, wait_until=None)
 
     def before_portal(self):
         self.used_portal = True
-        self.runner.portal_gate(self.key)
+        self.runner.portal_gate(self.key, self.check)
 
 
 def qid(label: str) -> str:
@@ -94,12 +98,12 @@ class Runner:
             self.current = key
             self.run_one(key)
 
-    def run_one(self, key):
+    def run_one(self, key, hooks=None):
         job = self.db.posting(key)
         if not job:
             return self.db.app_set(key, "failed", reason="The job is no longer stored. Run the search again.")
         self.cancelled.clear()
-        hooks = _Hooks(self, key)
+        hooks = hooks or _Hooks(self, key)
         st = self.db.settings()
         job = dict(job, key=key, hooks=hooks, portals=portals.enabled(st.get("fallback_portals")),
                    ai=st.get("ai_answers", True))
@@ -140,18 +144,19 @@ class Runner:
     def pause_s(self):
         return min(config.PORTAL_PAUSE_RANGE[1], max(0.0, float(self.db.settings()["portal_pause_s"])))
 
-    def portal_gate(self, key):
+    def portal_gate(self, key, check=None):
         """Wait until the configured pause has passed since the last portal application (shown as a countdown)."""
+        check = check or self.check_cancel
         until = self.last_portal_end + self.pause_s()
         left = until - time.time()
         if self.last_portal_end and left > 0:
             self.db.app_set(key, "running", wait_until=until,
                             step=f"Waiting {math.ceil(left)} s before the next job-portal application (rate limit)")
             while left > 0:
-                self.check_cancel()
+                check()
                 time.sleep(min(0.2, left))
                 left = until - time.time()
-        self.check_cancel()
+        check()
         self.portal_starts.append(time.time())
 
     def check_cancel(self):

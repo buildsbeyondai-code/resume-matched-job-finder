@@ -45,3 +45,37 @@ Test file abbreviations: **PI** = tests/test_portals_integration.py `PortalFallb
 | S4 | Traceability table | This table | Pass |
 | O1 | Per-run cap on portal applications | Not built (D38) | N/A |
 | NFR | Portal search + match ≤ 15 s per job on the fakes; API ≤ 200 ms during a run; profile dir 0700 | PI (whole 9-job run with 2 s pauses finishes inside the 400 s wait; the `/api/portals/check` reply during a run takes < 1 s); PU `test_browser_profile_is_owner_only` | Pass (≤ 200 ms not measured exactly: UNVERIFIED) |
+
+## Enhancement 2026-11-06 (2): unattended auto-apply (docs/ENHANCE_SPEC.md)
+Test file abbreviations:
+- **U** = tests/test_unattended.py (classes Settings, Runs, Safety, Helpers). Searches run through the real search.py and matching.py over a mocked network, with a scripted apply browser.
+- **UB** = tests/test_unattended_browser.py: the real apply flow in real Chromium against the local fake careers web, with a network guard.
+- **UUI** = tests/test_unattended_ui.py: real Chromium driving the app's own UI.
+
+| ID | Acceptance criterion (summary) | Test(s) | Status |
+|---|---|---|---|
+| M1 | Off and empty state after an upgrade. Interval 5 gives "Interval must be 15-1440 minutes" and nothing is saved. Enabling needs a confirmation, then the status shows "Running · next run HH:MM". | U `test_m1_off_by_default_validation_confirm_and_enable`, `test_migration_of_an_existing_install`; UUI `test_j1_set_up_with_inline_errors_review_and_confirm` | Pass |
+| M2 | A tick during a run is logged as "skipped: previous run active". After 3 missed intervals, exactly one catch-up run happens. | U `test_m2_no_overlap_and_one_catch_up_after_downtime`, `test_timer_waits_while_off_and_ticks_when_due` | Pass |
+| M3 | 10 postings, 4 of them new, 2 of those ≥ 80: exactly those 2 become candidates | U `test_m3_only_new_postings_at_or_above_the_minimum` | Pass |
+| M4 | Skip reasons: already applied, company cooldown until <date>, duplicate, hidden. "deferred: daily cap" jobs are reconsidered the next day. | U `test_m4_guards_duplicate_applied_hidden_cooldown_and_cap`, `test_cooldown_ignores_other_companies_and_zero_days`; UB (a later run skips the jobs as "already applied" / "already in Applications") | Pass |
+| M5 | 23:10 inside 22:00-07:00 gives "skipped: quiet hours". When quiet hours begin during a run, Submit is never pressed and the remaining jobs are deferred. | U `test_m5_quiet_hours_skip_and_stop_before_submit` | Pass |
+| M6 | Submitted only after the confirmation is detected and a screenshot is saved. Otherwise Needs you. | UB `test_real_flow_submitted_with_proof_walls_parked_and_never_retried` (real Chromium, real confirmation page, PNG ≤ 1 MB, 0600); U `test_m6_submitted_with_proof_m10_run_log_and_m11_summary`, `test_m6_m7_outcomes_are_never_guessed` (confirmation without a screenshot gives Needs you) | Pass |
+| M7 | Each of these gives Needs you with its specific reason: CAPTCHA, sign-in wall, account prompt, unanswered question, no portal match, no confirmation, unexpected page or timeout. Nothing is submitted. | UB (CAPTCHA form and sign-in wall in real Chromium: no POST, nothing sent to the CAPTCHA frame, the sign-in form is never submitted); U `test_m6_m7_outcomes_are_never_guessed` (10 outcomes) | Pass |
+| M8 | Pausing mid-form: no further form action within 5 s, the job becomes Needs you "Interrupted, check", the status shows Paused, and it is still Paused after a restart. The kill switch is on every view. | U `test_m8_pause_stops_the_form_within_5s_and_survives_a_restart`; UUI `test_j3_kill_switch_on_every_view_and_resume_confirmation` | Pass |
+| M9 | A job left as 'attempting' becomes Needs you "Interrupted, check" on restart and is never retried | U `test_m9_interrupted_attempt_becomes_needs_you_and_is_never_retried`; UB second run | Pass |
+| M10 | Run log: start and end time, trigger, searches, per-source errors, every job's outcome and reason, and the proof link | U `test_m6_submitted_with_proof_m10_run_log_and_m11_summary`; UUI `test_j6_run_log_states_and_per_job_outcomes` | Pass |
+| M11 | Today: counts 3/2/5 with reasons, the empty state, and error with Retry | U (as M10); UUI `test_j4_j5_daily_summary_states_and_dismiss` | Pass |
+| M12 | One source fails with HTTP 500: the other sources are still processed, and the log names the failed source | U `test_m12_one_failing_source_does_not_stop_the_run_and_s1_auto_pause`; UUI `test_j6` ("Board B: Unavailable …") | Pass |
+| M13 | New views: every state reachable, light and dark themes, no horizontal scroll at 320 px, contrast checks pass | UUI `test_m13_reflow_320_themes_names_and_settings_error_state`, plus the state checks in `test_j1`/`test_j4_j5`/`test_j6`; tests/test_ui_static.py | Pass |
+| M14 | Outbound requests go only to allow-listed hosts (the browser only to the loopback apply targets). No resume text in requests or logs. No innerHTML. | U `test_m14_hosts_allow_listed_and_no_resume_text_sent_or_logged`; UB (network guard, `ALLOWED_HOSTS`); test_ui_static (no innerHTML) | Pass |
+| M15 | The existing suite passes unchanged | Full suite and coverage gate (docs/ENHANCE_REPORT.md) | Pass |
+| S1 | Auto-pause after 3 run-level errors, with a banner | U `test_m12_…_s1_auto_pause`; UUI `test_j3` (banner) | Pass |
+| S2 | Run now respects every guard | U `test_pause_resume_off_run_now_and_security`; UUI `test_j1` | Pass |
+| S3 | Status bar: next run, today against the cap, and the open Needs you count | U `test_m3` (`today`); UUI `test_j1`, `test_j4_j5` ("2 need you" changes to "1 needs you") | Pass |
+| S4 | Delete all removes the settings, logs and screenshots | U `test_s4_delete_all_removes_settings_logs_and_screenshots` | Pass |
+| S5 | A switch for each saved search | U `test_s5_per_search_switch_and_unknown_search` | Pass |
+| O1 | In-page notice of new Needs you items | Live-region announcement in static/app.js; not asserted by a test | Built, UNVERIFIED |
+| O2 | Daily summary CSV | U `test_m6_…_m11_summary` (CSV and formula-injection quoting) | Pass |
+| O3 | Screenshot expiry | Not built (D51; the spec default of 0 means keep forever) | N/A |
+| Security | Cross-site writes are rejected (403). Resume needs `confirm`. Proof files are 0600 in a 0700 folder. | U `test_pause_resume_off_run_now_and_security`, `test_m6_…`; UB | Pass |
+| Perf | Summary API with 500 rows < 1 s, and < 1.5 s including rendering. Pause takes effect in < 5 s. | U `test_m6_…`; UUI `test_j4_j5`; U `test_m8` | Pass (API p95 < 300 ms during a run: UNVERIFIED) |

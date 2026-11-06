@@ -461,6 +461,7 @@ class Assistant:
             if not actions:
                 break
             for f, v in actions:
+                self._hook(s.job, "before_action")  # unattended mode: stop before the next form action when paused
                 try:
                     self._fill(s.page, f, v)
                     filled.append(details.clean_label(f["label"]) or f["name"])
@@ -762,6 +763,7 @@ class Assistant:
             if pick is None:
                 return done("needs_you", reason="No Submit button was found on the form.")
             fr, b = pick
+            self._hook(job, "before_click", b["kind"])  # unattended mode: never press Submit when paused or in quiet hours
             before_text, before_url = self._text(s.page), s.page.url
             try:
                 fr.locator(f'[data-rmjf-btn="{b["id"]}"]').first.click(timeout=5000)

@@ -1,136 +1,144 @@
-# Enhancement report: job-portal fallback (Naukri, then LinkedIn), 2026-11-06
+# Enhancement report: unattended auto-apply, 2026-11-06
 
-Spec: docs/ENHANCE_SPEC.md. Standards: UAISES §22 template, UEUIS Enterprise. Nothing was committed: every change is left in the working tree for review.
+- **Spec:** docs/ENHANCE_SPEC.md.
+- **Standards:** UAISES §22 template and UEUIS Enterprise.
+- **Session:** this session resumed build 20261106-071130-3f0256, which had stopped before finishing. The earlier attempt had already built the feature. This session added the missing tests, fixed two broken UI tests, wrote the docs, extended the coverage gate and verified everything.
+- **Nothing was committed.** Every change is left in the working tree for review.
+- **Previous report:** the report for the earlier job-portal enhancement was moved to docs/ENHANCE_REPORT_portals.md.
 
 ## Delivery summary
-- **Outcome:** Auto apply and Apply now finish jobs that have no company-site application, on Naukri and then LinkedIn:
-  - They search the portal and accept a result only when the company matches and the title similarity is ≥ 0.6. Ties go to the result in the job's city, then the newest.
-  - They prefer the portal's "Apply on company site" button when it is shown.
-  - On Naukri they fill the chat drawer (contenteditable answers, radio chips, Save). On LinkedIn they fill the Easy Apply dialog (Next, Review, Submit application). A Naukri one-click Apply also works.
-  - A job is marked Submitted only after a new confirmation text appears. A screenshot is kept as proof.
-  - Portal work runs one job at a time, with a configurable pause, a visible countdown and Cancel.
-  - Settings has Naukri/LinkedIn toggles (both on by default), the pause (5–600 s, default 20), and portal sign-in with a status check.
-  - Applications shows "via company site / via Naukri / via LinkedIn" and an "Open in browser" link for Needs-you items.
-  - Sign-in walls, CAPTCHAs, no match and no confirmation park the job as "Needs you" with the reason. The app never bypasses, guesses or creates anything.
-- **Changed files:**
-  - `app/apply.py`:
-    - `_portal` / `_portals` / `_blocked` / `_wall` / `_register` / `_hook`.
-    - `_company_site(search=)` and `_find_form(force)` with a single click.
-    - `_open` now has the portal branch, and `_auto` handles the portal outcomes, the no-confirmation rule and step progress.
-    - The scanner handles chat-drawer questions.
-    - Sign-in and status API added; the profile directory is now 0700.
-  - `app/autoapply.py`: per-job hooks (step, rate-limit gate), Cancel / `Cancelled`, `busy()`, and the stored `channel`.
-  - `app/portals.py`: configurable base URLs, `search_url`, `signin_url`, `signed_in`, `usable` (test-mode guard), `age_days`, and the new `best_result` ranking.
-  - `app/config.py`: `BROWSER_PORTAL_HOSTS`, `PORTAL_PAUSE_RANGE`, and defaults `fallback_portals` / `portal_pause_s`.
-  - `app/server.py`: `settings_error` validation (nothing is saved on error), `GET /api/portals`, `POST /api/portals/{check|naukri/signin|linkedin/signin}` (409 during a run), and `POST /api/autoapply/cancel`.
-  - UI files: `static/index.html`, `static/app.js`, `static/app.css`.
-  - `tools/coverage.sh`: portals.py added to the 100% gate.
-  - Tests:
-    - `tests/fake_careers.py`: fake Naukri and LinkedIn search, job pages, chat drawer, Easy Apply dialog, one-click Apply, company-site button, sign-in and CAPTCHA walls, no-confirmation case, and a request log.
-    - New test files: `tests/test_portals_integration.py`, `tests/test_portals_unit.py` and `tests/test_ui_browser.py`.
-  - Docs: README.md, docs/DECISIONS.md (D29–D39), docs/LEARNINGS.md, docs/REQUIREMENTS.md, docs/UI_STATES.md, docs/ACCESSIBILITY.md and this report.
+- **Outcome:** unattended mode is built.
+  - **What it does:** while the app is running, it re-runs the saved searches the user switched on, every N minutes. It applies to each *new* job at or above the minimum score, through the existing company site → Naukri → LinkedIn flows.
+  - **Off by default.** It is turned on with a review-and-confirm step. The first run is a dry run.
+  - **Guards** (each skip is logged with its reason): pause (kill switch on every view), quiet hours, daily cap (deferred, not dropped), company cooldown, duplicate, already applied, hidden by you.
+  - **Uncertain outcomes become Needs you**, with the specific reason. Nothing is guessed.
+  - **Crash safety:** an "attempting" record is written before any Submit, so no application is ever sent twice.
+  - **New views:** Today (daily summary with CSV export) and Run log.
+  - **Other features:** auto-pause after 3 failed runs in a row, Run now, a per-search switch, and delete-all cleanup.
+- **Changed files (this enhancement):**
+  - New: `app/unattended.py` (scheduler, guards, recovery, summary and log).
+  - `app/server.py`:
+    - Routes: `GET /api/unattended`, `/summary`, `/summary.csv` and `/runs`; `PUT /api/unattended/settings` and `/searches/<id>`; `POST /api/unattended/pause`, `resume`, `off`, `run`, `preview` and `jobs/<id>/dismiss`.
+    - Delete-all now also stops runs and removes screenshots.
+  - `app/db.py`: the `ua_runs` and `ua_jobs` tables, created additively, and the delete-all list.
+  - `app/search.py` and `app/sources.py`: a `fresh=` option that bypasses the 1 h cache (D53).
+  - `app/apply.py` and `app/autoapply.py`: two hook call sites (`before_action`, `before_click`), which the kill switch and quiet hours use. The apply logic is otherwise unchanged.
+  - UI: `static/index.html`, `static/app.js` and `static/app.css`. They add the status bar and kill switch on every view, the Unattended, Today and Run log sub-views of Applications, and the Resume confirmation dialog.
+  - New tests:
+    - `tests/test_unattended.py` (22 tests).
+    - `tests/test_unattended_ui.py` (5 real-Chromium UI journeys).
+    - **New this session:** `tests/test_unattended_browser.py` (a real-Chromium run of the real apply flow against `tests/fake_careers.py`, with a network guard).
+  - `tools/coverage.sh`: `app/unattended.py` was added to the 100% line and branch gate.
+  - Docs: README.md, docs/DECISIONS.md (D40–D53), docs/LEARNINGS.md, docs/REQUIREMENTS.md (new traceability section), docs/UI_STATES.md, docs/ACCESSIBILITY.md and this report.
 - **Architecture decisions:**
-  - D29: portal fallback order and matching.
-  - D30: portal hosts are allowed for the browser only (not `ALLOWED_HOSTS`).
-  - D31: one pause per job, counted from the previous portal job's end.
-  - D32: Applied only after confirmation; Submit is never pressed twice.
-  - D33: walls park the job.
-  - D34: **deviation**: an interrupted job is still "failed + Retry", not re-queued (M13 and safety).
-  - D35: in test mode only loopback portals are used.
-  - D36: sign-in status from cookies.
-  - D37: cancel semantics.
-  - D38: O1 not built.
-  - D39: channel stored in the existing JSON (no SQL migration needed).
+  - D40: storage and migration.
+  - D41: what a "saved search" is.
+  - D42: what counts as "new".
+  - D43: dry-run preview first.
+  - D44: timer and one catch-up.
+  - D45: no overlap, one browser.
+  - D46: guard order, and the daily cap counts unattended submissions.
+  - D47: pause and quiet hours via the hooks.
+  - D48: the crash-safe "attempting" record.
+  - D49: Submitted needs both a confirmation and a screenshot.
+  - D50: auto-pause.
+  - D51: optional features (O1 in-page, O2 built, O3 not built).
+  - D52: no personal data in the logs.
+  - D53: unattended runs bypass the cache.
 - **User-visible behaviour verified:**
-  - J1–J8 were run end to end in real headless Chromium against local fakes (PortalFallbackIntegration).
-  - The Settings and Applications screens were checked in a real browser (UIBrowser).
-  - No real Naukri, LinkedIn, Adzuna or employer site was contacted. A browser-level network guard records any non-loopback request, and it recorded none.
+  - J1, J3, J4, J5 and J6 in real Chromium against the app's own server (`tests/test_unattended_ui.py`).
+  - J2 (a scheduled run with real searching and scoring) is covered by `tests/test_unattended.py`.
+  - The real apply flow ran end to end in headless Chromium against local fake careers pages (`tests/test_unattended_browser.py`). No real employer, Naukri or LinkedIn site was contacted.
 
 ## Requirements → tests traceability
-See docs/REQUIREMENTS.md, section "Enhancement 2026-11-06". In short:
+The full table is in docs/REQUIREMENTS.md, section "Enhancement 2026-11-06 (2)". In short:
 
 | ID | Test |
 |---|---|
-| M1 order | test_portals_integration (request-log order) |
-| M2 company-site button | test_portals_integration (Naukri → fake Lever form, "via company site") |
-| M3 matching / next portal / not found | test_portals_integration + test_portals_unit.test_best_result_company_title_location_and_age |
-| M4 Naukri chat + one-click | test_portals_integration (answers received: years "16", relocate "Yes") |
-| M5 LinkedIn Easy Apply | test_portals_integration (`pressed == [Next, Review, Submit application]`) |
-| M6 no confirmation / screenshot | test_portals_integration (needs_you "Confirmation not found", no proof; proof PNG < 1 MB for Applied) |
-| M7 settings | test_portals_unit.test_m7_defaults_validation_and_persistence + test_ui_browser.test_m7_settings_portal_journey |
-| M8 pause / serial | test_portals_integration (`portal_starts` gaps ≥ 2 s) + test_portals_unit.RunnerGate |
-| M9 walls / portals off / no Adzuna POST | test_portals_integration |
-| M10 merged question | test_portals_integration (one question for 3 jobs; saved as "Willing to relocate: Yes"; all resume) |
-| M11 via labels / empty | test_ui_browser.test_m11_applications_via_labels_progress_and_empty_state |
-| M12 coverage + network guard | tools/coverage.sh; `self.left == []` |
-| M13 existing tests | full suite green, existing test files unedited |
-| S1 sign-in | test_portals_integration, test_portals_unit.test_portal_routes_cancel_and_busy |
-| S2 live progress | test_ui_browser + test_portals_integration |
-| S3 Open in browser | test_ui_browser |
-| Migration | test_portals_unit.test_migration_of_an_existing_install |
-| Security: profile 0700 | test_portals_unit.ProfilePermissions |
+| M1 | test_unattended `test_m1_…`, `test_migration_…`; test_unattended_ui `test_j1_…` |
+| M2 | `test_m2_no_overlap_and_one_catch_up_after_downtime`, `test_timer_waits_while_off_and_ticks_when_due` |
+| M3 | `test_m3_only_new_postings_at_or_above_the_minimum` (10 / 4 / 2) |
+| M4 | `test_m4_guards_…`, `test_cooldown_…`; test_unattended_browser (later run skips them) |
+| M5 | `test_m5_quiet_hours_skip_and_stop_before_submit` |
+| M6 | test_unattended_browser (real confirmation + PNG ≤ 1 MB, 0600); `test_m6_…` |
+| M7 | test_unattended_browser (real CAPTCHA form and sign-in wall: no POST); `test_m6_m7_outcomes_are_never_guessed` (10 reasons) |
+| M8 | `test_m8_pause_stops_the_form_within_5s_and_survives_a_restart`; UI `test_j3_…` (all 8 views, keyboard, < 5 s) |
+| M9 | `test_m9_interrupted_attempt_becomes_needs_you_and_is_never_retried` |
+| M10 / M11 | `test_m6_submitted_with_proof_m10_run_log_and_m11_summary`; UI `test_j4_j5_…`, `test_j6_…` |
+| M12 | `test_m12_one_failing_source_does_not_stop_the_run_and_s1_auto_pause` |
+| M13 | UI `test_m13_reflow_320_themes_names_and_settings_error_state`; tests/test_ui_static.py |
+| M14 | `test_m14_hosts_allow_listed_and_no_resume_text_sent_or_logged`; test_unattended_browser network guard |
+| M15 | Full suite green; no existing test was edited |
+| S1–S5, O2 | See REQUIREMENTS.md (all Pass) |
+| O1 | Built (live-region notice), not asserted by a test: UNVERIFIED |
+| O3 | Not built (D51) |
 
 ## Verification evidence
 | Check | Command / method | Result | Evidence |
 |---|---|---|---|
-| Baseline suite (before) | `bash tools/coverage.sh` | **79 tests OK**, 85.6 s; gate 100% (apply 412 stmts / 140 branches, autoapply 109/34, details 161/76, direct 72/10); portals.py 29% (not gated, not wired) | Run at the start of the session |
-| Baseline with system python (before) | `python3 -m unittest discover -s tests -t .` | 79 run, 1 failure, 2 skipped | The failure is environmental: Playwright isn't installed for the system python, so the "system libraries" message test gets "not installed". The same failure remains under the system python after the change. The venv run is the reference. |
-| Full suite (after) | `bash tools/coverage.sh` | **92 tests OK**, 222.3 s, exit 0 | Gate: apply 509/178, autoapply 156/48, details 161/76, direct 72/10, portals 62/16, **all 100% line and branch** |
-| Portal end-to-end | `.venv/bin/python -m unittest tests.test_portals_integration` | OK, 128 s (9 jobs, 2 rounds, 2 s pauses, the cancel case) | Network guard list empty |
-| Browser UI tests | `.venv/bin/python -m unittest tests.test_ui_browser` | 3 tests OK, 8.5 s | Keyboard, names, focus, 24 px targets, 320 px, themes, errors |
-| Fast unit inner loop | `python3 -m unittest tests.test_portals_unit tests.test_ui_static tests.test_unit` | 41 tests OK, 3.5 s | — |
-| Static UI conformance | tests/test_ui_static.py | 10 OK (contrast both themes, labels, no innerHTML, no gradients, one primary per view) | — |
-| App launch via `./run.sh` | Not run: this session's permission mode blocked starting a server process | UNVERIFIED | The same `server.make_server` + real index.html/app.js are exercised by test_ui_browser and the integration tests |
+| Suite at the start of this session | `.venv/bin/python -m unittest discover -s tests -t .` | 119 run, **1 error, 1 failure**, 387 s | The error was in `test_unattended_ui` (test_j3 and test_j4_j5 when run alone): a string `wait_for_function` that the app's CSP (`script-src 'self'`, no unsafe-eval) blocks. Fixed by using function predicates. The failure was `test_rank_1000_under_1s` at 1.20 s, while a second browser suite ran in parallel. It passes alone (3 of 3 with the venv). |
+| Spec baseline (before the earlier attempt) | from ENHANCE_SPEC `_resume` | 92 passed, 0 failed | — |
+| Full suite + coverage gate (after) | `bash tools/coverage.sh` | **120 tests OK**, 418 s, exit 0 | Gate: apply 511/178, autoapply 159/48, details 161/76, direct 72/10, portals 62/16, **unattended 491/176**: all **100% line and branch**. Whole app 96%. |
+| New real-browser run | `.venv/bin/python -m unittest tests.test_unattended_browser` | 1 test OK, 16 s | Submitted with a proof screenshot. CAPTCHA and sign-in wall parked as Needs you. No re-apply. Browser guard list empty. |
+| UI journeys | `.venv/bin/python -m unittest tests.test_unattended_ui` | 5 tests OK, 31 s | Covers keyboard, names, ≥ 24 px, focus ≥ 2 px, 320 px in both themes, every state, and Descriptions. |
+| System python (CLAUDE.md command) | `python3 -m unittest discover -s tests -t .` | 120 run, 12 skipped, **2 failures** | 1) `test_apply_branches…test_call_propagates_errors_and_context_failures`: Playwright isn't installed for the system python. This environmental failure is known from the previous report. 2) `test_rank_1000_under_1s` fails consistently under the system python (about 1.0–1.2 s against a 1.0 s limit). It passes with the venv. The scoring cost comes from D23 (skills re-detected at scoring time, an earlier enhancement). This change doesn't touch matching.py or skills.py. Both are reported, not hidden. |
+| App launch via `./run.sh` | Attempted on port 5093 with a temp DB | **UNVERIFIED** | This session's permission mode blocked starting a server. `server.make_server` with the real index.html and app.js is exercised by the browser tests. |
 
 ## Release quality gates (UAISES §18)
 | Gate | PASS / FAIL / N/A / UNVERIFIED | Reason |
 |---|---|---|
-| Requirements | PASS | M1–M13 and S1–S4 have acceptance tests (traceability above). O1 is deliberately not built (D38). The restart behaviour deviates from the spec (D34, documented). |
-| Real functionality | PASS (against fakes) / UNVERIFIED (real portals) | Every behaviour runs real Playwright actions on realistic fake pages. The real Naukri and LinkedIn DOMs were not used (the spec forbids testing against them), so selectors such as the chat-drawer class names and button texts may need tuning on the live sites. |
-| Code quality | PASS | The diff only touches the apply feature, settings and UI. Existing conventions are kept. No unrelated refactoring. No linter is configured in the project. |
-| Testing | PASS | Unit, route, integration and real-browser end-to-end tests. 100% line and branch on the 5 gated modules. All 79 pre-existing tests still pass, unedited. |
-| Security | PASS | Server binds to 127.0.0.1. Portal hosts are browser-only (D30). No passwords are stored. The profile is 0700. No CAPTCHA bypass, account creation or Adzuna apply path, each enforced by a test. Writes keep the Origin/Host checks. No innerHTML in app code. Test mode can't reach real portals (D35). A formal threat review or scanner was not run. |
-| Reliability | PASS | One job's failure parks only that job (continues to the next). Submit is never pressed twice on a portal. Cancel never marks a job Applied. Interrupted jobs → "failed, Retry" (D34). |
-| Performance | PASS / UNVERIFIED | The portal search and match on the fakes takes a few seconds per job (the whole 9-job run including 2 s pauses passes in 128 s). The API answers in < 1 s during a run (asserted). The ≤ 200 ms target and the ≤ 30 s on the real sites were not measured. |
-| Packaging | PASS | No new dependencies or install steps. Existing databases work unchanged (migration test). |
-| Operations | PASS | Every parked job shows its reason and next step in the UI. Browser errors are recorded on the job. Rollback = turn both portals off in Settings, or revert the working-tree change. |
-| Velocity | PASS | Inner loop 41 tests in 3.5 s; full gate 222 s (≤ 5 min target); the queue drains without fixed intervals except the user-set pause. |
+| Requirements | PASS | M1–M15 and S1–S5 have acceptance tests. O2 is built and tested. O1 is built but untested. O3 is deliberately not built (D51). |
+| Real functionality | PASS (fakes) / UNVERIFIED (real sites) | The real search and scoring code runs, and so does the real Playwright apply flow, against realistic local fakes. The live employer and portal DOMs were not used, because the spec forbids that. |
+| Code quality | PASS | The feature lives in one module. Shared code changed only at two hook call sites and the `fresh` flag. There is no unrelated refactoring. No linter is configured. |
+| Testing | PASS | Unit, route, integration, real-browser end-to-end, and UI tests. 100% line and branch on the 6 gated modules. Existing tests are unedited. |
+| Security | PASS | Server binds to 127.0.0.1. Cross-site writes return 403 (tested). Resume needs `confirm`. Outbound requests go only through `ALLOWED_HOSTS` (tested), and the browser reaches only the apply targets (guard tested). Logs contain no resume text (tested). Proof files are 0600 in a 0700 folder. No passwords, no account creation, no CAPTCHA solving. No innerHTML (static test). A formal threat model and a scanner were not run. |
+| Reliability | PASS | "attempting" is written before Submit, and recovery runs on start (M9). Runs never overlap. One failing source never aborts a run. Pause and settings persist. Auto-pause after 3 run-level errors. |
+| Performance | PASS / UNVERIFIED | Pause takes < 5 s (tested). The 500-row summary API takes < 1 s, and < 1.5 s including rendering. API p95 < 300 ms during a real run, ≤ 200 ms settings saves, and ≤ 500 MB peak memory were not measured. |
+| Packaging | PASS | No new dependencies or install steps. The migration is additive and idempotent (tested). The mode is off after an upgrade. |
+| Operations | PASS | The run log shows every run, trigger, source error and job outcome. The banner explains an auto-pause. Rollback: Turn off, or Pause. |
+| Velocity | PASS / UNVERIFIED | The unattended tests run quickly without the browser. The full gate takes 418 s, which exceeds the ≤ 5 min target because the real-browser suites dominate. |
 
 ## UI gate table (UEUIS §20)
 | Gate | PASS / FAIL / N/A / UNVERIFIED | Reason |
 |---|---|---|
-| Interaction principles | PASS | Self-descriptive: the current job, step and channel are always shown. Controllable: Cancel at every stage, Retry. Error tolerant: each Needs-you reason says what to do next. Conforms to expectations: links navigate, buttons act. |
-| States | PASS | docs/UI_STATES.md lists every state of Applications and Settings. Empty, loading/progress, error, partial and success are covered by test_ui_browser and the integration test. |
-| Accessibility | UNVERIFIED | The automated parts pass: keyboard reachability, names, focus ≥ 2 px, 24 px targets, reflow at 320 px, live regions, contrast tokens. axe-core, a screen reader, and 200% zoom / text spacing were not run. |
-| Theming | PASS | No new colour tokens. The contrast tests pass in both themes. The browser test shows light and dark differ in the header, navigation and background, and the choice is remembered. |
-| Palette and restraint | PASS | "Pine & Paper" / "Pine Night" unchanged. No gradients, glows or glass (static test). The new controls are text buttons. |
-| Focus and descriptions | PASS | The portal explanation uses `.desc` (hidden by the Descriptions switch). Errors and data never use it. |
-| Restraint and density | PASS / UNVERIFIED | One primary button per view (static test). Screenshots at 1366×768 and 1536×864 were not reviewed by a person. |
-| Professional polish | UNVERIFIED | There are busy states on the sign-in buttons and Cancel, and no nested interactive elements. No human screenshot review per theme. |
-| Rich interface | PASS | Live run: current step, countdown with server-time correction, queue size, and the "via" channel chip. |
-| Visual design | PASS / UNVERIFIED | Tokens only, and status is never shown by colour alone (chips carry text). No visual review by a person. |
-| Responsive | PASS / UNVERIFIED | 320 px with no horizontal scroll on all tabs (browser test). The 200% zoom check was not run. |
-| Content | PASS | Plain-language reasons ("Naukri needs a sign-in. Open Settings, select Sign in to Naukri, …", "Confirmation not found: …"). |
-| Forms | PASS | Visible labels, a unit, min/max, an inline error linked by aria-describedby, aria-invalid, focus moves to the field, input kept, nothing saved on error (browser and API tests). |
-| Truthfulness | PASS | Submitted only after a verified confirmation. Sign-in status says "not checked yet" until it is actually checked. |
-| Ethics | PASS | No dark patterns. The README and the Settings text warn about portal terms of use, and portals can be turned off. |
+| Interaction principles | PASS | Self-descriptive: the status bar always shows the mode, the next run, today against the cap, and Needs you. Controllable: pause and resume from every view, Turn off. Error tolerant: inline fixes and a confirm step before enabling. Conforms to expectations: links navigate, buttons act. |
+| States | PASS | docs/UI_STATES.md covers the status bar, Unattended, Today and Run log. Loading, empty, error with Retry, success, busy and disabled states are asserted in test_unattended_ui. |
+| Accessibility | UNVERIFIED | The automated parts pass: keyboard reachability of the kill switch on all 8 views, accessible names, focus ≥ 2 px, targets ≥ 24 px, 320 px reflow, live regions (assertive and polite), and the static contrast checks. axe-core, a screen reader, 200% zoom and Firefox/Safari were not run. |
+| Theming | PASS | The contrast tests pass in both themes. The status bar differs between light and dark (tested). The theme choice is remembered. |
+| Palette and restraint | PASS | "Pine & Paper" / "Pine Night" are unchanged. No gradients, glows or glass (static test). |
+| Organised screens | UNVERIFIED | No §8.20 browser test for inner scroll bars or empty bands on the new views. |
+| Honest actions | PASS | Run now returns "Not started: <reason>" when a guard says no. Submitted only with a confirmation and a screenshot. |
+| Focus and descriptions | PASS | The new explanatory text uses `.desc` and is hidden by the switch. Hints and errors stay visible (tested). The run log and summary are on their own sub-views. |
+| Restraint and density | PASS / UNVERIFIED | One primary button per view (static test). No human review of screenshots at 1366×768 and 1536×864. |
+| Professional polish | UNVERIFIED | Busy states on Save, a first-run empty state, real tables, and no nested interactive elements. No human screenshot review per theme. |
+| Rich interface | PASS | Live status with the next run and the current job. Scores are shown in the tables. Per-run expandable job lists. |
+| Visual design | PASS / UNVERIFIED | Tokens only. Status uses text plus an icon (✓ / ! / – and ▶ / ❚❚ / ○), never colour alone. No visual review by a person. |
+| Responsive | PASS / UNVERIFIED | 320 px with no horizontal scroll on the new views in both themes (tested). 200% zoom not run. |
+| Content | PASS | Plain-language summaries ("Up to 15 applications a day to jobs scoring 80 or more, every 60 min, not between 22:00 and 07:00") and reasons ("company cooldown until 2026-12-01", "Interrupted, check whether it was submitted"). |
+| Forms | PASS | Visible labels and units, an error summary with links, inline errors, `aria-invalid`, input kept, and nothing saved on error (tested in the API and in the browser). |
+| Truthfulness | PASS | Counts come from the run log. Submitted only after verified proof. "status unavailable" is shown when the server can't be reached. |
+| Ethics | PASS | Off by default, explicit confirmation, a visible kill switch, and no dark patterns. |
 | i18n | N/A | The app is not localised. |
-| Performance | UNVERIFIED | Not measured on target hardware against the real portals. |
+| Performance | UNVERIFIED | Not measured on target hardware during real runs. |
 | Usability | UNVERIFIED | No §16 evaluation with users. |
-| Tests | PASS | The §17 automated suite is green, and every primary journey of this change is covered. |
+| Tests | PASS | The §17 automated suite is green, and every journey of this change (J1–J6) is covered. |
 
 ## Risks and remaining work
 - **Blockers:** none.
 - **Unverified claims:**
-  - Behaviour on the live Naukri and LinkedIn DOMs (selectors, the chat-drawer class names, the LinkedIn review step and the session cookie names) is untested, because the spec forbids live tests.
-  - Not run: axe-core, a screen reader, 200% zoom, and Firefox/Safari.
-  - Not measured: API latency ≤ 200 ms and proof screenshot size on real pages (a full-page PNG of a long portal page can exceed 1 MB).
-  - Launch via `./run.sh` was not run (permission mode).
+  - Behaviour against live employer, Naukri and LinkedIn pages.
+  - The `./run.sh` launch (blocked by the permission mode).
+  - axe-core, a screen reader, 200% zoom, and Firefox/Safari.
+  - API p95 and memory during a real run.
+  - The O1 announcement (not asserted by a test).
 - **Known limitations:**
-  - O1 (per-run cap) is not built.
-  - An interrupted job is not auto-re-queued (D34).
-  - Navigation timeouts are the existing 45 s, not the 30 s per step in the spec.
-  - The browser tab of a cancelled job stays open until the next run.
-  - LinkedIn and Naukri may change their UIs, and the portals' terms restrict automation (accepted by the user in the spec).
-- **Rollback:** untick both portals in Settings (instant, no code change), or discard the uncommitted working-tree changes.
-- **Next highest-value step:** sign in once and run one supervised Auto apply on a single real Naukri job and a single LinkedIn Easy Apply job with the window visible. Then tune the selectors (`chatbot_Drawer`, `botMsg`, the radio-chip containers) and the `nauk_at`/`li_at` cookie names if needed, and record the results in docs/LEARNINGS.md.
+  - The daily cap counts unattended submissions only (D46).
+  - The first enable always runs a dry run first (D43).
+  - On a company form with a CAPTCHA, the visible fields may already be filled before the CAPTCHA is detected. Nothing is ever typed into the CAPTCHA frame or submitted.
+  - Screenshot expiry (O3) is not built.
+  - `test_rank_1000_under_1s` fails under the system `python3` on this machine. This predates this change.
+  - Automated applying may break the Naukri and LinkedIn terms of use (see README).
+- **Rollback:**
+  - Instant: **Pause auto-apply**, or **Turn off** in Applications → Unattended. Settings are kept.
+  - Full: discard the uncommitted working-tree changes. The `ua_*` tables are additive and harmless if left behind.
+- **Next highest-value step:** turn the mode on with one saved search, a cap of 1 and the browser visible. Read the dry-run results in the Run log, then let one real run happen while you watch. Record what the live sites did in docs/LEARNINGS.md.

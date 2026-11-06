@@ -6,9 +6,9 @@ import mimetypes
 import re
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
-from . import apply as applying, autoapply, config, details, portals, search, sources
+from . import apply as applying, autoapply, config, details, portals, search, sources, unattended
 from .db import DB
 from .resume import ResumeError, parse_resume
 from .skills import canonical_skill
@@ -48,9 +48,11 @@ def settings_error(b):
 
 def make_handler(db: DB):
     runner = autoapply.Runner(db)
+    ua = unattended.Unattended(db, runner)  # after the Runner: interrupted unattended jobs become Needs you
 
     class H(BaseHTTPRequestHandler):
         auto = runner
+        unattended = ua
         server_version = "RMJF"
 
         def log_message(self, fmt, *args):  # never log query strings (may contain filters) or bodies
@@ -150,6 +152,18 @@ def make_handler(db: DB):
                                        "resume_file": rf.name if rf else None})
             if path == "/api/export.csv":
                 return self.export()
+            if path == "/api/unattended":
+                return self.send(200, ua.status())
+            if path in ("/api/unattended/summary", "/api/unattended/summary.csv"):
+                day = (parse_qs(urlparse(self.path).query).get("day") or [unattended.day_of(ua.clock())])[0]
+                if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+                    return self.err(400, "Choose a day as YYYY-MM-DD.", "day")
+                if path.endswith(".csv"):
+                    return self.send(200, ua.summary_csv(day), "text/csv; charset=utf-8",
+                                     {"Content-Disposition": f'attachment; filename="unattended-{day}.csv"'})
+                return self.send(200, ua.summary(day))
+            if path == "/api/unattended/runs":
+                return self.send(200, {"runs": ua.runs()})
             return self.err(404, "Not found")
 
         def do_POST(self):
@@ -221,6 +235,8 @@ def make_handler(db: DB):
                         return self.err(400, "The request could not be read.")
                     answers = {str(k)[:40]: str(v)[:4000] for k, v in answers.items()}
                     return self.apply_call(applying.ASSISTANT.answer, m.group(1), answers)
+                if path.startswith("/api/unattended/"):
+                    return self.unattended_post(path)
                 if path == "/api/sources":
                     b = self.body_json()
                     kind, token = b.get("kind", ""), (b.get("token") or "").strip()
@@ -271,6 +287,17 @@ def make_handler(db: DB):
                         if k in b:
                             db.set_setting(k, typ(b[k]))
                     return self.send(200, state(db))
+                if path == "/api/unattended/settings":
+                    out, errors = ua.update(b)
+                    if errors:  # nothing is saved; every problem is listed with its field
+                        return self.send(400, {"error": errors[0]["message"], "field": errors[0]["field"],
+                                               "errors": errors})
+                    return self.send(200, out)
+                m = re.fullmatch(r"/api/unattended/searches/([0-9a-f]{12})", path)
+                if m:
+                    if not ua.set_search(m.group(1), isinstance(b, dict) and b.get("enabled") is True):
+                        return self.err(404, "That saved search no longer exists.")
+                    return self.send(200, ua.status())
                 m = re.fullmatch(r"/api/sources/(\d+)", path)
                 if m:
                     db.x("UPDATE sources SET enabled=? WHERE id=?", (1 if b.get("enabled") else 0, int(m.group(1))))
@@ -284,6 +311,7 @@ def make_handler(db: DB):
                 return self.err(403, "Cross-site request blocked")
             path = urlparse(self.path).path
             if path == "/api/data":
+                ua.wipe()  # stops any unattended run and removes the proof screenshots (S4)
                 db.delete_all()
                 return self.send(200, {"ok": True})
             m = re.fullmatch(r"/api/sources/(\d+)", path)
@@ -293,6 +321,38 @@ def make_handler(db: DB):
             return self.err(404, "Not found")
 
         # ---------- handlers ----------
+        def unattended_post(self, path):
+            b = self.body_json()
+            b = b if isinstance(b, dict) else {}
+            if path == "/api/unattended/pause":
+                ua.pause()
+                return self.send(200, ua.status())
+            if path == "/api/unattended/resume":
+                if b.get("confirm") is not True:
+                    return self.err(400, "Confirm that unattended mode should start applying again.", "confirm")
+                if not ua.settings()["enabled"]:
+                    return self.err(409, "Unattended mode is off. Set it up and turn it on first.")
+                ua.resume()
+                return self.send(200, ua.status())
+            if path == "/api/unattended/off":
+                ua.turn_off()
+                return self.send(200, ua.status())
+            if path in ("/api/unattended/run", "/api/unattended/preview"):
+                if not ua.settings()["configured"]:
+                    return self.err(409, "Set up unattended mode first.")
+                preview = path.endswith("preview")
+                run_id, why = ua.tick("preview" if preview else "manual", dry=True if preview else None)
+                body = {"run_id": run_id, "skipped": why, **ua.status()}
+                if why:
+                    body["error"] = f"Not started: {why}."
+                return self.send(409 if why else 202, body)
+            m = re.fullmatch(r"/api/unattended/jobs/(\d+)/dismiss", path)
+            if m:
+                if not ua.dismiss(int(m.group(1))):
+                    return self.err(404, "That item is not waiting for you.")
+                return self.send(200, ua.status())
+            return self.err(404, "Not found")
+
         def apply_call(self, fn, *args):
             try:
                 return self.send(200, fn(*args))

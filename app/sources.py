@@ -38,10 +38,11 @@ def _urllib_fetch(url: str, timeout: float) -> str:
 FETCH = _urllib_fetch
 
 
-def http_get(url: str, db=None, cancel=None, sleep=None) -> str:
+def http_get(url: str, db=None, cancel=None, sleep=None, fresh=False) -> str:
+    """GET an allow-listed URL with retries. `fresh` skips the cached copy (the reply is still cached)."""
     sleep = sleep or time.sleep
     check_allowed(url)
-    if db is not None:
+    if db is not None and not fresh:
         cached = db.cache_get(url)
         if cached is not None:
             return cached

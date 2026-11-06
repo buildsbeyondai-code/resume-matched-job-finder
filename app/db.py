@@ -1,4 +1,5 @@
-"""SQLite storage (WAL) for profile, sources, searches, postings, saved/hidden state and HTTP cache."""
+"""SQLite storage (WAL) for profile, sources, searches, postings, saved/hidden state, HTTP cache, applications and
+the unattended auto-apply run log (ua_runs, ua_jobs; created additively on start, existing data untouched)."""
 import json
 import sqlite3
 import threading
@@ -18,6 +19,13 @@ CREATE TABLE IF NOT EXISTS searches (id INTEGER PRIMARY KEY AUTOINCREMENT, param
 CREATE TABLE IF NOT EXISTS job_state (key TEXT PRIMARY KEY, state TEXT, updated REAL);
 CREATE TABLE IF NOT EXISTS applications (key TEXT PRIMARY KEY, status TEXT, data TEXT, updated REAL);
 CREATE TABLE IF NOT EXISTS http_cache (url TEXT PRIMARY KEY, body TEXT, fetched REAL);
+CREATE TABLE IF NOT EXISTS ua_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, started REAL, ended REAL, day TEXT,
+  trigger TEXT, status TEXT, note TEXT, dry INTEGER DEFAULT 0, searches TEXT, source_errors TEXT, counts TEXT);
+CREATE TABLE IF NOT EXISTS ua_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, key TEXT, ts REAL, day TEXT,
+  outcome TEXT, reason TEXT, title TEXT, company TEXT, score INTEGER, source TEXT, proof TEXT, resolved INTEGER DEFAULT 0);
+CREATE INDEX IF NOT EXISTS ua_jobs_day ON ua_jobs(day);
+CREATE INDEX IF NOT EXISTS ua_jobs_key ON ua_jobs(key);
+CREATE INDEX IF NOT EXISTS ua_runs_day ON ua_runs(day);
 """
 
 
@@ -176,7 +184,8 @@ class DB:
 
     def delete_all(self):
         with self.lock:
-            for t in ("profile", "postings", "searches", "job_state", "http_cache", "settings", "applications"):
+            for t in ("profile", "postings", "searches", "job_state", "http_cache", "settings", "applications",
+                      "ua_runs", "ua_jobs"):
                 self.conn.execute(f"DELETE FROM {t}")
             self.conn.commit()
         self.reset_sources()
