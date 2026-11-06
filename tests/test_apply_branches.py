@@ -504,7 +504,7 @@ class RouteBranches(TmpDetails):
     def call(self, method, path, body=None):
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.base + path, data=data, method=method,
-                                     headers={"Content-Type": "application/json"} if data else {})
+                                     headers={"X-RMJF-Request": "1", **({"Content-Type": "application/json"} if data else {})})
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
                 return r.status, json.loads(r.read())

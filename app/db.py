@@ -28,6 +28,23 @@ CREATE INDEX IF NOT EXISTS ua_jobs_key ON ua_jobs(key);
 CREATE INDEX IF NOT EXISTS ua_runs_day ON ua_runs(day);
 """
 
+# Versioned migrations (PRAGMA user_version). Version 1 is SCHEMA above (every 1.x database). Each later step is
+# additive; the file is backed up before any step runs (docs/OPERATIONS_AND_ROLLBACK.md).
+MIGRATIONS = {
+    2: """
+CREATE TABLE IF NOT EXISTS submissions (submission_key TEXT PRIMARY KEY, job_key TEXT NOT NULL, state TEXT NOT NULL,
+  attempt_id TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL, detail TEXT);
+CREATE INDEX IF NOT EXISTS submissions_job ON submissions(job_key);
+CREATE TABLE IF NOT EXISTS audit (seq INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, kind TEXT NOT NULL,
+  job_key TEXT, data TEXT NOT NULL, prev_hash TEXT NOT NULL, hash TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ai_usage (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, day TEXT NOT NULL,
+  model TEXT, cost_usd REAL, input_tokens INTEGER, output_tokens INTEGER, ok INTEGER, error TEXT,
+  prompt_version TEXT, questions INTEGER);
+CREATE INDEX IF NOT EXISTS ai_usage_day ON ai_usage(day);
+""",
+}
+SCHEMA_VERSION = max(MIGRATIONS)
+
 
 class DB:
     def __init__(self, path=None):
@@ -40,10 +57,36 @@ class DB:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
+        fresh = not self.conn.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchall()
         self.conn.executescript(SCHEMA)
+        self.migrate(backup=not fresh)
         if not self.q("SELECT 1 FROM sources LIMIT 1"):
             self.reset_sources()
         self.prune()
+
+    def schema_version(self):
+        return self.q("PRAGMA user_version")[0][0]
+
+    def migrate(self, backup=True):
+        """Bring the schema to SCHEMA_VERSION. A file database is copied first (online backup API) to
+        data/backups/, so a failed or unwanted upgrade can be rolled back by restoring that file."""
+        v = self.schema_version() or 1
+        if v >= SCHEMA_VERSION:
+            return None
+        path = None
+        if backup and self.path != ":memory:":
+            from pathlib import Path
+            d = Path(self.path).parent / "backups"
+            d.mkdir(parents=True, exist_ok=True)
+            path = d / f"{Path(self.path).stem}-schema{v}-{time.strftime('%Y%m%d-%H%M%S')}.sqlite3"
+            dst = sqlite3.connect(str(path))
+            with dst:
+                self.conn.backup(dst)
+            dst.close()
+        with self.lock:
+            for n in range(v + 1, SCHEMA_VERSION + 1):
+                self.conn.executescript("BEGIN;" + MIGRATIONS[n] + f"PRAGMA user_version={n}; COMMIT;")
+        return path
 
     def q(self, sql, args=()):
         with self.lock:

@@ -129,7 +129,7 @@ class Base(unittest.TestCase):
     def call(self, method, path, body=None, headers=None, raw=False):
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.base + path, data=data, method=method,
-                                     headers={"Content-Type": "application/json", **(headers or {})})
+                                     headers={"Content-Type": "application/json", "X-RMJF-Request": "1", **(headers or {})})
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
                 b = r.read()

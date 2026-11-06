@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+VERSION = "2.0.0"
 STATIC_DIR = ROOT / "static"
 
 HOST = "127.0.0.1"  # never bind to other interfaces (security requirement)

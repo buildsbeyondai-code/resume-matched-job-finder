@@ -83,15 +83,28 @@ def make_handler(db: DB):
                 raise ValueError("Request too large")
             return json.loads(self.rfile.read(n) or b"{}")
 
+        def local_host(self):
+            """Host must name this server on loopback, with this server's port (blocks DNS rebinding)."""
+            host = (self.headers.get("Host") or "").lower()
+            port = self.server.server_address[1]
+            return host in (f"127.0.0.1:{port}", f"localhost:{port}") or (port == 80 and host in ("127.0.0.1", "localhost"))
+
         def same_origin(self):
-            """Block cross-site and DNS-rebinding writes: Host must be local, Origin (if sent) must match."""
-            host = (self.headers.get("Host") or "").split(":")[0]
-            if host not in ("127.0.0.1", "localhost"):
+            """Writes are accepted only from this app's own page (THREAT_MODEL.md T1-T3):
+            - Host is this server (loopback + port);
+            - Origin, when sent, is exactly this server's origin (another localhost port is another site);
+            - Sec-Fetch-Site, when sent, is same-origin (or none: typed by the user);
+            - the custom header X-RMJF-Request is present. Browsers can't add it cross-site without a CORS
+              preflight, which this server never approves, so a forged form or fetch from any other origin fails."""
+            if not self.local_host():
                 return False
+            port = self.server.server_address[1]
             origin = self.headers.get("Origin")
-            if origin and urlparse(origin).hostname not in ("127.0.0.1", "localhost"):
+            if origin and origin.lower() not in (f"http://127.0.0.1:{port}", f"http://localhost:{port}"):
                 return False
-            return True
+            if self.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):
+                return False
+            return self.headers.get("X-RMJF-Request") == "1"
 
         # ---------- routing ----------
         def do_HEAD(self):
@@ -99,9 +112,16 @@ def make_handler(db: DB):
 
         def do_GET(self):
             path = urlparse(self.path).path
-            host = (self.headers.get("Host") or "").split(":")[0]
-            if host not in ("127.0.0.1", "localhost"):
+            if not self.local_host():
                 return self.err(403, "Forbidden host")
+            if path == "/healthz":  # liveness: the process serves requests
+                return self.send(200, {"status": "ok", "version": config.VERSION})
+            if path == "/readyz":  # readiness: the database answers
+                try:
+                    db.q("SELECT 1")
+                except Exception:  # noqa: BLE001
+                    return self.send(503, {"status": "not ready"})
+                return self.send(200, {"status": "ready", "version": config.VERSION, "schema": db.schema_version()})
             if path == "/" or path == "/index.html":
                 return self.static("index.html")
             if path.startswith("/static/"):

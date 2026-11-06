@@ -8,7 +8,7 @@ const announce = (msg) => { const a = $("#announcer"); a.textContent = ""; setTi
 const list = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
 
 async function api(method, url, body, headers) {
-  const opts = { method, headers: headers || {} };
+  const opts = { method, headers: Object.assign({ "X-RMJF-Request": "1" }, headers || {}) };
   if (body !== undefined) {
     if (body instanceof Blob || body instanceof ArrayBuffer) opts.body = body;
     else { opts.body = JSON.stringify(body); opts.headers["Content-Type"] = "application/json"; }

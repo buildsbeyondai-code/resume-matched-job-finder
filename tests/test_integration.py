@@ -20,7 +20,7 @@ class Client:
 
     def req(self, method, path, body=None, headers=None, raw=False):
         data = body if isinstance(body, bytes) or body is None else json.dumps(body).encode()
-        h = {"Content-Type": "application/json", **(headers or {})}
+        h = {"Content-Type": "application/json", "X-RMJF-Request": "1", **(headers or {})}
         r = urllib.request.Request(self.base + path, data=data, method=method, headers=h)
         try:
             with urllib.request.urlopen(r, timeout=20) as resp:
