@@ -1,4 +1,6 @@
-# Resume-Matched Job Finder
+# Resume-Matched Job Finder 2.0
+
+> **2.0 changes the default:** nothing is filled in or sent until you choose a mode in **Settings → Application policy** (*Search only* is the default). See [CHANGELOG.md](CHANGELOG.md) and [docs/MIGRATION_2.0.md](docs/MIGRATION_2.0.md).
 
 A local web app that searches official public job APIs (Greenhouse, Lever and SmartRecruiters company boards, plus the licensed Adzuna aggregator) by country, work mode (remote, hybrid or on-site), skills and keywords. It then ranks every posting 0-100 against your resume. Matching happens on your computer, and your resume is never sent anywhere.
 
@@ -11,15 +13,25 @@ A local web app that searches official public job APIs (Greenhouse, Lever and Sm
 - Everything is stored in local SQLite (WAL mode). Deleting all your data takes one action.
 - Light and dark themes follow your system setting, and you can override it (the choice is remembered). A Descriptions switch hides explanatory text. The UI targets WCAG 2.2 AA.
 
+## Application policy (2.0)
+| Mode | What happens |
+|---|---|
+| **Search only** (default) | search and ranking only; the browser is never driven |
+| **Prepare for review** | applications are filled up to Submit and stop as *Ready for your review*; you press Submit yourself |
+| **Submit automatically** | applications are sent within the scope you confirmed (daily cap, channels, excluded employers), until the permission expires |
+
+Before any click that may send an application, a deterministic gate checks the policy. Each application has a submission key (employer + role + location), so the same job is never sent twice, even through another board. If Submit was pressed but no confirmation was seen, the job becomes **Outcome unknown**. It is never retried automatically: you record "It was sent" or "It was not sent". Every decision is written to a hash-chained audit log (`/api/audit`). Details: [docs/APPLICATION_AUTHORIZATION.md](docs/APPLICATION_AUTHORIZATION.md), [docs/STATE_MACHINE_AND_IDEMPOTENCY.md](docs/STATE_MACHINE_AND_IDEMPOTENCY.md).
+
 ## Auto apply
-Select **Auto apply** above the results (or **Apply** on one job). For each job, the app finds the application on the company's own website. For Adzuna jobs it follows Adzuna's company link or checks the company's own Greenhouse, Lever, SmartRecruiters, Ashby or Workable board. It then fills the form from `resume_details.md`, uploads your resume, steps through multi-page forms, presses **Submit** and keeps a screenshot of the confirmation page. The **Applications** tab shows each job's status. Required questions that your details don't answer go to **Claude Opus 5.5**, which answers them from your resume and resume_details.md (the answers and the fact behind each are shown; turn this off in Settings → AI answers). Questions Claude can't support from your facts (salary, notice period, visa, legal consents) are collected there, asked once and saved. CAPTCHAs, sign-in walls and aggregator-only jobs are marked **Needs you** or **No company website**, never guessed. Test coverage: `tools/coverage.sh`.
+Select **Auto apply** above the results (or **Apply** on one job). For each job, the app finds the application on the company's own website. For Adzuna jobs it follows Adzuna's company link or checks the company's own Greenhouse, Lever, SmartRecruiters, Ashby or Workable board. It then fills the form from `resume_details.md`, uploads your resume, steps through multi-page forms, presses **Submit** (only when your policy allows it) and keeps a screenshot of the confirmation page. The **Applications** tab shows each job's status. Required questions that your details don't answer go to **Claude Opus 5.5**. Claude answers them only from numbered facts in your resume and resume_details.md, and each answer must cite the facts it uses. Contact details and sensitive fields are never sent. The answers, the cited facts and a confidence score are shown. Turn this off in Settings → AI answers. See [docs/CLAUDE_MODEL_INTEGRATION.md](docs/CLAUDE_MODEL_INTEGRATION.md). Questions Claude can't support from your facts (salary, notice period, visa, legal consents) are collected there, asked once and saved. CAPTCHAs, sign-in walls and aggregator-only jobs are marked **Needs you** or **No company website**, never guessed. Test coverage: `tools/coverage.sh`.
 
 ### Job portals: the last resort (Naukri, then LinkedIn)
 When a company has no application on its own website, auto apply can apply on a job portal instead. It uses the portal's own search and accepts a result only when the company matches and the title is close (similarity ≥ 0.6). If the portal shows **Apply on company site**, the app follows that link and applies there. Otherwise it fills Naukri's question drawer or LinkedIn's Easy Apply dialog (Next, Review, Submit application). A job counts as **Submitted** only after the portal's confirmation appears ("You have successfully applied" or "Your application was sent"), and a screenshot is kept as proof. The Applications tab shows how each job was applied for: "via company site", "via Naukri" or "via LinkedIn".
 
 - **Settings → Job portals** turns Naukri and LinkedIn on or off (both on by default) and sets the **pause between portal applications** (default 20 seconds, 5 to 600). Portal applications run one at a time. While the app waits, the Applications tab shows a countdown and a **Cancel auto apply** button.
 - **Settings → Portal sign-in** opens the portal's sign-in page in the app's own browser window. Sign in once. The session stays in `data/browser-profile` (owner-only permissions), and the app stores no passwords.
-- The app never solves CAPTCHAs, never creates accounts and never applies through Adzuna. A sign-in wall, CAPTCHA, no matching job, or no confirmation parks the job as **Needs you** with the reason and an **Open in browser** link.
+- The app never solves CAPTCHAs, never creates accounts and never applies through Adzuna. A sign-in wall, CAPTCHA or no matching job parks the job as **Needs you** with the reason and an **Open in browser** link. No confirmation after Submit gives **Outcome unknown**.
+- Behaviour on the real Naukri and LinkedIn sites is **not verified**, and their terms restrict automation. Read [docs/PORTAL_POLICY_MATRIX.md](docs/PORTAL_POLICY_MATRIX.md) before you allow them in the policy.
 - Automated applying may break Naukri's and LinkedIn's terms of use and could get your account restricted. Leave both portals off if that matters to you.
 
 ## Unattended auto-apply (off by default)
@@ -62,10 +74,16 @@ Requires Python 3.11 or newer. There are **no third-party dependencies**; it use
 ```bash
 python3 -m unittest discover -s tests -t .
 ```
-The suite has 120 tests: unit tests, adapter contract tests against recorded-shape fixtures, integration and journey tests over real HTTP with a mocked network, static UI conformance checks, end-to-end auto-apply tests in real Chromium against local fake career sites and fake Naukri/LinkedIn pages (`tests/fake_careers.py`, never the real sites), and browser UI tests (`tests/test_ui_browser.py`). The browser tests are skipped when Playwright Chromium is not installed. Unattended mode has its own tests (`tests/test_unattended.py` for the scheduler, guards and crash recovery, `tests/test_unattended_ui.py` for the browser journeys, and `tests/test_unattended_browser.py` for a real-browser run against the local fake careers pages). `tools/coverage.sh` runs everything and fails unless `app/apply.py`, `autoapply.py`, `details.py`, `direct.py`, `portals.py` and `unattended.py` have 100% line and branch coverage. See docs/REQUIREMENTS.md.
+See docs/TEST_MATRIX.md for the current counts and coverage. The suite includes unit tests, adapter contract tests against recorded-shape fixtures, integration and journey tests over real HTTP with a mocked network, static UI conformance checks, end-to-end auto-apply tests in real Chromium against local fake career sites and fake Naukri/LinkedIn pages (`tests/fake_careers.py`, never the real sites), and browser UI tests (`tests/test_ui_browser.py`). The browser tests are skipped when Playwright Chromium is not installed. Unattended mode has its own tests (`tests/test_unattended.py` for the scheduler, guards and crash recovery, `tests/test_unattended_ui.py` for the browser journeys, and `tests/test_unattended_browser.py` for a real-browser run against the local fake careers pages). `tools/coverage.sh` runs everything and fails unless the apply and safety modules (`ai`, `apply`, `autoapply`, `details`, `direct`, `policy`, `audit`, `states`, `portals`, `unattended`) have 100% line and branch coverage. Other tools:
+- `tools/mutation.py` breaks each safety rule and expects the tests to catch it.
+- `tests/test_properties.py` runs fuzz and property tests.
+- `tools/bench.py` measures latency and throughput.
+- `tools/scan_secrets.sh` checks tracked files for secrets and personal data.
+
+CI is in `.github/workflows/ci.yml`. See docs/REQUIREMENTS.md.
 
 ## Docs
-See docs/ARCHITECTURE.md, docs/DECISIONS.md, docs/REQUIREMENTS.md, docs/UI_STATES.md, docs/ACCESSIBILITY.md, docs/REUSE.md, docs/LEARNINGS.md and docs/COMPLETION_REPORT.md.
+2.0: docs/THREAT_MODEL.md, docs/PRIVACY_AND_DATA_FLOW.md, docs/PORTAL_POLICY_MATRIX.md, docs/APPLICATION_AUTHORIZATION.md, docs/STATE_MACHINE_AND_IDEMPOTENCY.md, docs/CLAUDE_MODEL_INTEGRATION.md, docs/TEST_MATRIX.md, docs/SECURITY_TEST_REPORT.md, docs/ENTERPRISE_DEPLOYMENT.md, docs/OPERATIONS_AND_ROLLBACK.md, docs/FINAL_INDEPENDENT_AUDIT.md. Earlier docs: docs/ARCHITECTURE.md, docs/DECISIONS.md, docs/REQUIREMENTS.md, docs/UI_STATES.md, docs/ACCESSIBILITY.md, docs/REUSE.md, docs/LEARNINGS.md and docs/COMPLETION_REPORT.md.
 
 ## Credits
 Reuse candidates were reviewed (see docs/REUSE.md). No code was copied. Ideas were taken from FoundRole jobs-mcp-proxy (ISC) and workopia-mcp (MIT): report only what the parser actually extracted, and give job search a filter-first shape. The upstream projects without a license were read for orientation only.
