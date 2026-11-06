@@ -163,21 +163,34 @@ class Adzuna:
             raise SourceError("Not configured: set ADZUNA_APP_ID and ADZUNA_APP_KEY in .env")
         from .matching import country_code
         ccs = [country_code(c) for c in (params.get("countries") or [])] or ["us"]
-        what = " ".join(x for x in [params.get("keywords", ""), *(params.get("skills") or [])[:3]] if x).strip()
-        if params.get("mode") == "remote":
-            what = (what + " remote").strip()
+        # Adzuna's "what" requires every word, so a repeated or extra term shrinks results sharply
+        # ("AI AI remote" -> 4 hits, "AI remote" -> 162). Use each term once; skills only widen the
+        # search (what_or) when no keywords were typed.
+        def uniq(words):
+            seen, out = set(), []
+            for w in words:
+                if w and w.lower() not in seen:
+                    seen.add(w.lower()); out.append(w)
+            return out
+        kw = uniq((params.get("keywords") or "").split())
+        sk = [s for s in uniq((params.get("skills") or [])[:5]) if s.lower() not in {k.lower() for k in kw}]
+        if params.get("mode") == "remote" and "remote" not in {k.lower() for k in kw}:
+            kw.append("remote")
         urls = []
         for cc in ccs:
             if cc not in ADZUNA_CC:
                 continue
             q = {"app_id": app_id, "app_key": key, "results_per_page": 50, "content-type": "application/json",
                  "max_days_old": params.get("max_age_days", 30)}
-            if what:
-                q["what_or" if not params.get("keywords") else "what"] = what
+            if kw:
+                q["what"] = " ".join(kw)
+            if sk and not params.get("keywords"):
+                q["what_or"] = " ".join(sk)
             if params.get("companies"):
                 q["company"] = params["companies"][0] if len(params["companies"]) == 1 else None
                 q = {k: v for k, v in q.items() if v is not None}
-            urls.append(f"https://api.adzuna.com/v1/api/jobs/{cc}/search/1?{urllib.parse.urlencode(q)}")
+            for page in (1, 2):  # up to 100 postings per country
+                urls.append(f"https://api.adzuna.com/v1/api/jobs/{cc}/search/{page}?{urllib.parse.urlencode(q)}")
         return urls
 
     def parse(self, body, src):

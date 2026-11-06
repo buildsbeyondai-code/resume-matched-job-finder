@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS postings (key TEXT PRIMARY KEY, data TEXT, first_seen
 CREATE TABLE IF NOT EXISTS searches (id INTEGER PRIMARY KEY AUTOINCREMENT, params TEXT, created REAL,
   result_keys TEXT, failed TEXT);
 CREATE TABLE IF NOT EXISTS job_state (key TEXT PRIMARY KEY, state TEXT, updated REAL);
+CREATE TABLE IF NOT EXISTS applications (key TEXT PRIMARY KEY, status TEXT, data TEXT, updated REAL);
 CREATE TABLE IF NOT EXISTS http_cache (url TEXT PRIMARY KEY, body TEXT, fetched REAL);
 """
 
@@ -133,6 +134,30 @@ class DB:
         r = self.q("SELECT data FROM postings WHERE key=?", (key,))
         return json.loads(r[0]["data"]) if r else None
 
+    # applications (auto apply)
+    def app_get(self, key):
+        r = self.q("SELECT status, data, updated FROM applications WHERE key=?", (key,))
+        if not r:
+            return None
+        d = json.loads(r[0]["data"])
+        d.update(key=key, status=r[0]["status"], updated=r[0]["updated"])
+        return d
+
+    def app_set(self, key, status, **data):
+        cur = self.app_get(key) or {}
+        cur.update(data)
+        for k in ("key", "status", "updated"):
+            cur.pop(k, None)
+        self.x("INSERT OR REPLACE INTO applications(key,status,data,updated) VALUES(?,?,?,?)",
+               (key, status, json.dumps(cur), time.time()))
+        return self.app_get(key)
+
+    def app_list(self):
+        out = []
+        for r in self.q("SELECT key FROM applications ORDER BY updated DESC"):
+            out.append(self.app_get(r["key"]))
+        return out
+
     # cache
     def cache_get(self, url):
         r = self.q("SELECT body,fetched FROM http_cache WHERE url=?", (url,))
@@ -151,7 +176,7 @@ class DB:
 
     def delete_all(self):
         with self.lock:
-            for t in ("profile", "postings", "searches", "job_state", "http_cache", "settings"):
+            for t in ("profile", "postings", "searches", "job_state", "http_cache", "settings", "applications"):
                 self.conn.execute(f"DELETE FROM {t}")
             self.conn.commit()
         self.reset_sources()

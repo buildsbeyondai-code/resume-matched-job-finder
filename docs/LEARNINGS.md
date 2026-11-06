@@ -4,3 +4,25 @@
 - A default argument like `sleep=time.sleep` is bound when the function is defined, so tests cannot patch it. Look it up at call time instead.
 - Live check: three real public APIs returned 873 postings. The first uncached search took 29.2 s, almost all of it network time (a cached repeat took 3.4 s). Large `content=true` board payloads dominate. A future fix is a per-source page-size or description cap and streaming first results.
 - Most large MNCs do not expose public ATS board APIs, so a licensed aggregator is the only compliant way to reach them.
+
+- Adzuna's `what` requires every word: repeated or extra terms ("AI AI remote") cut 162 hits to 4. Send each term once.
+- Without a resume every score was ~4, and the default minimum of 40 silently hid all results. Fall back to search-term relevance.
+- `.row { display: flex }` overrode the `hidden` attribute (an empty Undo bar showed). Keep `[hidden] { display: none !important }`.
+- Empty-state reasons must not use the hideable `.desc` class, or they vanish when Descriptions is off.
+- Playwright's sync API is bound to the thread that started it, so one worker thread owns the browser and the HTTP handlers queue work to it.
+- In WSL (NAT networking), WSL can't reach Windows `127.0.0.1`, so driving Windows Chrome over CDP fails. Use Chromium inside WSL (shown through WSLg). It needs `sudo .venv/bin/python -m playwright install-deps chromium` once.
+- ATS forms label fields in many ways (`label[for]`, wrapping labels, aria-labelledby, fieldset legends, sibling "question" divs). Radio groups need the question text, not the option text, so the scanner skips option labels.
+- WSL: DISPLAY may be set to a Windows X-server address (127.0.0.1:0.0) that does not exist. A visible Chromium then fails with "Target page, context or browser has been closed". apply.browser_env() switches to WSLg :0.
+- Resumes from online builders often use CID/Type0 fonts. Without ToUnicode decoding, the built-in reader returned 21k characters of glyph codes, and the profile ended up with 0 skills, so every job scored low and the 40 minimum hid them. Check that extracted text is readable.
+- Back-to-back jobs (12/2016 then 01/2017) must merge when counting years, or each one-year boundary is lost (13 years instead of 16).
+- Adzuna's API `redirect_url` is usually its own `/details/` page; the employer link only appears on that page as `/land/ad/…`. Agency-posted jobs often have only Adzuna's own application (account required). Live check: 1 of 40 Adzuna companies had a public ATS board (Together AI on Greenhouse). Each lookup takes about 2–3 s.
+- Adzuna's CloudFront blocks headless Chromium ("The request could not be satisfied"); the visible browser loads it.
+- Job pages often say "Thank you for your interest", so a confirmation only counts if the text was absent before Submit (`apply.confirmed`).
+- `body.get("answers") or {}` turns `[]` into `{}` and skips the type check. Use `.get("answers", {})`.
+- LinkedIn's Easy Apply "Review" step has buttons but no fields, so "no form found" must not end a portal application while the dialog still offers Next/Review/Submit.
+- Portal chat drawers (Naukri) ask one question at a time. The question is the bot's last message, radio "chips" have no fieldset or legend, and every chat question is required even though nothing is marked with `required`.
+- A portal "Apply" opens its own drawer or dialog. Clicking Apply a second time (the old `_find_form` loop) would hit the page behind the overlay, so in portal mode Apply is clicked only once.
+- `page.goto` to the same URL with the same `#hash` doesn't reload the page. Browser tests go to `about:blank` first.
+- Playwright can't `fill()` letters into `<input type=number>`. Browsers report typed letters as "", which is what the UI validates.
+- Existing end-to-end tests ran with the new "portals on by default" setting and would have contacted the real Naukri. Test mode must exclude any non-loopback portal (D35).
+- Multi-step forms can reveal new required questions only on their last page, so auto apply may need two rounds of questions for one job. Answers are saved, so this happens only once.

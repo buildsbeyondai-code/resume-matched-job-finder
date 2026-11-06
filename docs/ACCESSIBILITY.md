@@ -10,11 +10,28 @@
 - Focus ring is 3 px using the `--focus` token (≥ 3:1 in both themes). Buttons are at least 36 px tall and link-like buttons at least 24 px.
 - Reflow: fluid grids, a 720 px breakpoint, tables collapse, long text wraps, and there are no fixed widths of 100 px or more.
 - Reduced motion turns off spinners. Forced-colours mode uses system colours.
+- **Job portals (2026-11-06):**
+  - The Naukri and LinkedIn toggles are native checkboxes inside a `<fieldset>`/`<legend>`, with wrapping `<label>`s (targets ≥ 24 px).
+  - The pause input has a label, the unit "seconds (5 to 600)" linked by `aria-describedby`, `min`/`max`, and an inline `role="alert"` error that is also linked by `aria-describedby`. `aria-invalid` is set, focus moves to the field, and the typed value is kept.
+  - The run progress (`#appProgress`) is a polite live region. It changes only when the step changes. The per-second countdown sits next to it and is `aria-hidden`, so screen readers are not flooded.
+  - The "via …" channel is shown as text (a chip), not colour alone.
+  - "Open in browser" is a link (it navigates), and its accessible name includes the job and "opens in a new tab". Retry, I applied, Cancel auto apply and the sign-in buttons are buttons (they act).
+  - No new colour tokens were added. New chips reuse existing token pairs that the contrast tests already check in both themes.
 
 ## How it was tested
 - `tests/test_ui_static.py` (automated): WCAG contrast ratios of every text and UI token pair in **both** themes (≥ 4.5:1 text, ≥ 3:1 UI); system-dark tokens equal manual-dark tokens; labels for all controls; button types; landmarks and skip link; no innerHTML; no gradients, glass or text-shadow; forced-colours and reduced-motion rules present; one primary button per view.
+- `tests/test_ui_browser.py` (automated, real Chromium, added 2026-11-06):
+  - Keyboard only: Tab from the top reaches the portal checkboxes, the pause, Save and the sign-in buttons in a logical order. Space toggles a checkbox and Enter submits.
+  - The focus outline is ≥ 2 px.
+  - Every visible control on all five tabs has an accessible name.
+  - The portal labels and buttons are ≥ 24 px tall.
+  - There is no horizontal scroll at 320 px on all five tabs.
+  - Light and dark themes differ in the header, navigation and page background, and the theme choice is remembered after a reload.
+  - The inline error and `aria-invalid` work, and nothing is saved while the pause is invalid.
+  - The live region has `aria-live="polite"`.
+  - There are no script errors, and no request leaves the app.
 
 ## Known issues / not verified
-- **No real-browser testing.** Chromium, Playwright and axe-core could not be installed in the build environment. These are therefore UNVERIFIED: the axe scan, keyboard walk-through, no horizontal scroll at 320 px, 200% zoom, and screen-reader output.
+- **Not run:** an axe-core scan (not installed), a screen-reader pass (NVDA/VoiceOver), 200% zoom and text-spacing checks, and checks in Firefox and Safari. These remain UNVERIFIED.
 - Remove source uses the native `confirm()` dialog.
-- Focus after hiding a job moves to the next job's title, or to Undo if there is none. This has not been checked in a browser.
+- The real Naukri and LinkedIn pages are third-party UIs in the app's browser window and are outside this app's accessibility control.

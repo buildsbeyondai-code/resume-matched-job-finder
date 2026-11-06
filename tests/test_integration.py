@@ -131,6 +131,19 @@ class Journeys(AppTestCase):
         self.assertGreater(len(res["jobs"]), 0)
         self.assertEqual([f["label"] for f in res["failed"]], ["ExampleCorp (Lever)"])
 
+    def test_unconfigured_adzuna_is_skipped_not_failed(self):
+        old = os.environ.pop("ADZUNA_APP_ID", None), os.environ.pop("ADZUNA_APP_KEY", None)
+        self.db.x("INSERT INTO sources(kind,token,label,enabled) VALUES('adzuna','','Adzuna',1)")
+        try:
+            s, res = self.search({"countries": ["Germany"], "mode": "remote"})
+        finally:
+            if old[0]: os.environ["ADZUNA_APP_ID"] = old[0]
+            if old[1]: os.environ["ADZUNA_APP_KEY"] = old[1]
+        states = {x["label"]: x["state"] for x in s["sources"]}
+        self.assertEqual(states["Adzuna"], "skipped")
+        self.assertEqual(res["failed"], [])  # no "results may be incomplete" banner
+        self.assertGreater(len(res["jobs"]), 0)
+
     def test_cancel(self):
         gate = threading.Event()
         def slow(url, timeout):

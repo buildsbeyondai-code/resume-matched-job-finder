@@ -13,6 +13,12 @@ MAX_RETRIES = 2
 CACHE_TTL_S = 3600
 PRUNE_DAYS = 60
 PAGE_SIZE = 50
+# Apply assistant: show the browser window (set RMJF_APPLY_HEADLESS=1 only for automated tests).
+APPLY_HEADLESS = os.environ.get("RMJF_APPLY_HEADLESS", "") == "1"
+# Tests only: accept http://127.0.0.1 / http://localhost job links (local fake career sites).
+ALLOW_LOCAL_HTTP = os.environ.get("RMJF_ALLOW_LOCAL_HTTP", "") == "1"
+APPLICATIONS_DIR = Path(os.environ.get("RMJF_APPLICATIONS_DIR", str(ROOT / "data" / "applications")))
+BROWSER_PROFILE = Path(os.environ.get("RMJF_BROWSER_PROFILE", str(ROOT / "data" / "browser-profile")))
 
 # Outbound requests are restricted to these HTTPS hosts (M3, security).
 ALLOWED_HOSTS = {
@@ -20,9 +26,20 @@ ALLOWED_HOSTS = {
     "api.lever.co",
     "api.smartrecruiters.com",
     "api.adzuna.com",
+    # company careers boards, used to find an aggregator job's original posting (app/direct.py)
+    "api.ashbyhq.com",
+    "apply.workable.com",
 }
 
+# Job portals used by the apply browser only (never by sources.http_get): the last-resort application channel
+# when a company has no application on its own website (app/portals.py). See docs/DECISIONS.md D29.
+BROWSER_PORTAL_HOSTS = {"www.naukri.com", "www.linkedin.com"}
+PORTAL_PAUSE_RANGE = (5, 600)  # seconds between portal applications (rate limit)
+
 DEFAULTS = {
+    "fallback_portals": ["naukri", "linkedin"],
+    "portal_pause_s": 20,
+    "ai_answers": True,  # Claude Opus 5.5 answers questions resume_details.md can't (app/ai.py, D40)
     "countries": ["India", "United States", "United Kingdom", "Germany"],
     "mode": "remote",
     "max_age_days": 30,

@@ -58,8 +58,16 @@ class SearchRun:
             return []
 
     def run(self):
-        srcs = self.db.sources(enabled_only=True)
-        for s in srcs:
+        srcs = []
+        for s in self.db.sources(enabled_only=True):
+            adapter = sources.ADAPTERS.get(s["kind"])
+            # A source that needs credentials which were never set up is skipped, not failed:
+            # it is an optional source, so it must not mark results as incomplete.
+            if adapter is not None and hasattr(adapter, "configured") and not adapter.configured():
+                self.status[str(s["id"])] = {"id": s["id"], "label": s["label"], "state": "skipped", "count": 0,
+                                             "error": "No API key set up (optional)"}
+                continue
+            srcs.append(s)
             self.status[str(s["id"])] = {"id": s["id"], "label": s["label"], "state": "queued", "count": 0, "error": ""}
         raw = []
         with ThreadPoolExecutor(max_workers=max(1, min(10, len(srcs)))) as ex:
@@ -88,7 +96,7 @@ def finalize(db, raw, params, profile, level, failed):
     prev_keys = set(json.loads(prev["result_keys"])) if prev else None
     for p in merged:
         p["countries"] = sorted(p["countries"])
-        p.update(matching.score(p, profile or {}, level))
+        p.update(matching.score(p, matching.effective_profile(profile, params), level))
     merged.sort(key=lambda p: (-p["score"], p.get("posted") or ""), reverse=False)
     db.upsert_postings(merged)
     keys = [p["key"] for p in merged]
@@ -118,7 +126,7 @@ def latest_results(db):
     if not s:
         return None
     states = db.job_states()
-    profile = db.get_profile() or {}
+    profile = matching.effective_profile(db.get_profile(), json.loads(s["params"]))
     level = db.get_setting("seniority", "mid")
     new_keys = set(db.get_setting("new_keys", []))
     jobs = []

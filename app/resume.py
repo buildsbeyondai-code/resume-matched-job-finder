@@ -105,9 +105,36 @@ def _text_from_content(content: bytes) -> str:
     return "\n".join(lines)
 
 
+def readable(text: str) -> bool:
+    """True when extracted text is mostly letters/digits/punctuation (not glyph-ID garbage)."""
+    sample = text[:20000]
+    if not sample.strip():
+        return False
+    good = sum(1 for c in sample if c.isascii() and (c.isalnum() or c in " \n\t.,;:()/&+-%@'\"#|"))
+    words = re.findall(r"[A-Za-z]{3,}", sample)
+    return good / len(sample) > 0.85 and (len(sample) < 400 or len(words) >= 20)
+
+
+def _pypdf_text(data: bytes):
+    """Use pypdf when installed: it decodes ToUnicode/CID fonts that the built-in reader can't."""
+    try:
+        import logging
+        import pypdf
+        logging.getLogger("pypdf").setLevel(logging.ERROR)
+        reader = pypdf.PdfReader(io.BytesIO(data))
+        return "\n".join((pg.extract_text() or "") for pg in reader.pages[:20])
+    except ImportError:
+        return None
+    except Exception:  # noqa: BLE001 - fall back to the built-in reader
+        return None
+
+
 def pdf_text(data: bytes) -> str:
     if b"%%EOF" not in data[-2048:] and b"%%EOF" not in data:
         raise ResumeError("The PDF file is incomplete or corrupted.")
+    t = _pypdf_text(data)
+    if t and readable(t):
+        return t
     texts = []
     for m in STREAM_RE.finditer(data):
         head, body = m.group(1), m.group(2)
@@ -121,6 +148,9 @@ def pdf_text(data: bytes) -> str:
         if b"BT" in body:
             texts.append(_text_from_content(body))
     text = "\n".join(texts)
+    if text.strip() and not readable(text):
+        raise ResumeError("The text in this PDF uses a font encoding that could not be read. Install the optional "
+                          "PDF reader (.venv/bin/pip install pypdf), upload a DOCX, or enter your skills below.")
     if not text.strip():
         raise ResumeError("No readable text was found in the PDF. It may be a scanned image or use an "
                           "unsupported font encoding. Try exporting it again, or upload a DOCX.")
@@ -129,7 +159,7 @@ def pdf_text(data: bytes) -> str:
 
 # ---------------- profile ----------------
 YEARS_RE = re.compile(r"(\d{1,2})\s*\+?\s*(?:years?|yrs?)\b(?:\s+of)?(?:\s+\w+){0,3}?\s+experience", re.I)
-RANGE_RE = re.compile(r"\b((?:19|20)\d{2})\s*(?:-|–|—|to)\s*((?:19|20)\d{2}|present|current|now)\b", re.I)
+RANGE_RE = re.compile(r"\b((?:19|20)\d{2})\s*(?:-|–|—|to)\s*(?:\d{1,2}/)?((?:19|20)\d{2}|present|current|now)\b", re.I)
 
 
 def extract_years(text: str) -> float:
@@ -148,7 +178,7 @@ def extract_years(text: str) -> float:
     spans.sort()
     total, cur_s, cur_e = 0, spans[0][0], spans[0][1]
     for s, e in spans[1:]:
-        if s <= cur_e:
+        if s <= cur_e + 1:  # a job starting the year after the previous one ended is continuous
             cur_e = max(cur_e, e)
         else:
             total += cur_e - cur_s; cur_s, cur_e = s, e

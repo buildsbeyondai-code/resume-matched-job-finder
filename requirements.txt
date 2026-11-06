@@ -1,2 +1,5 @@
 # No third-party runtime dependencies: the app uses only the Python 3.11+ standard library
 # (http.server, sqlite3, zipfile, zlib, urllib). Tests use unittest.
+# Optional, for the Apply assistant only: playwright (see README "Apply assistant").
+# Optional: pypdf (better PDF text extraction for resumes with embedded/CID fonts).
+# Optional, for tests only: coverage (tools/coverage.sh).

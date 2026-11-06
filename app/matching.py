@@ -69,6 +69,11 @@ def detect_mode(p) -> str:
         return "remote"
     if re.search(r"\bhybrid\b", desc[:1500]):
         return "hybrid"
+    # A remote / work-from-home mention with no negation or on-site requirement counts as remote
+    # (aggregator snippets are short, so "fully remote" is often cut off).
+    if (re.search(r"\bremote(ly)?\b|\bwork from home\b|\bwfh\b", desc[:1500])
+            and not re.search(r"\bnot remote\b|\bno remote\b|\bon[- ]?site\b|\bin[- ]office\b", desc[:1500])):
+        return "remote"
     return "onsite"
 
 
@@ -141,13 +146,41 @@ def seniority_fit(title: str, years: float, level: str = "mid") -> float:
     return 1.0 if lo >= 2 or (years or 0) >= 2 else 0.7
 
 
+def search_profile(params) -> dict:
+    """Stand-in profile built from the search terms, used when no resume has been uploaded,
+    so results are ranked by relevance to what was searched instead of all scoring ~0."""
+    terms = list(params.get("skills") or []) + re.findall(r"\w[\w+#.]*", params.get("keywords") or "")
+    return {"skills": terms, "titles": [" ".join(terms)], "years": 0, "from_search": True}
+
+
+def effective_profile(profile, params) -> dict:
+    """The resume profile when one with skills exists, otherwise the search-terms profile."""
+    return profile if (profile and profile.get("skills")) else search_profile(params or {})
+
+
 def score(p, profile, level="mid") -> dict:
-    """Score 0-100: 70 skill coverage + 15 title similarity + 15 seniority fit."""
+    """Score 0-100: 70 skill coverage + 15 title similarity + 15 seniority fit.
+    With no resume, the score is relevance to the search terms instead (see search_profile)."""
+    if profile.get("from_search"):
+        terms = [t for t in dict.fromkeys(x.lower() for x in profile.get("skills") or []) if t]
+        if not terms:
+            return {"score": 50, "matched": [], "missing": []}
+        title = (p.get("title") or "").lower()
+        text = title + " " + (p.get("description") or "").lower()
+        in_title = sum(1 for t in terms if _has(title, t))
+        in_text = sum(1 for t in terms if _has(text, t))
+        total = round(40 + 35 * in_title / len(terms) + 25 * in_text / len(terms))
+        return {"score": max(0, min(100, total)), "matched": [t for t in terms if _has(text, t)],
+                "missing": [t for t in terms if not _has(text, t)]}
     mine = {s.lower() for s in (profile.get("skills") or [])}
-    job = p.get("skills") or []
+    # re-detect so postings stored before a vocabulary update are scored with the current skill list
+    job = list(dict.fromkeys(list(p.get("skills") or []) +
+                             find_skills((p.get("title") or "") + "\n" + (p.get("description") or ""))))
     matched = [s for s in job if s.lower() in mine]
     missing = [s for s in job if s.lower() not in mine]
-    coverage = len(matched) / len(job) if job else 0.0
+    # Nobody has every skill a posting lists: matching ~60% of them counts as full coverage. At least 3
+    # matches are needed for full marks, so a short snippet with one recognised skill can't score 100.
+    coverage = min(1.0, len(matched) / max(3, round(len(job) * 0.6))) if job else 0.0
     title_low = (p.get("title") or "").lower()
     title_words = {w for t in (profile.get("titles") or []) for w in re.findall(r"[a-z]+", t.lower()) if len(w) > 3}
     tsim = 0.0

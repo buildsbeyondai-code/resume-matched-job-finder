@@ -8,7 +8,7 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-from . import config, search, sources
+from . import apply as applying, autoapply, config, details, portals, search, sources
 from .db import DB
 from .resume import ResumeError, parse_resume
 from .skills import canonical_skill
@@ -22,8 +22,35 @@ SECURITY_HEADERS = {
 }
 
 
+def job_url_ok(url):
+    url = url or ""
+    if url.startswith("https://"):
+        return True
+    return config.ALLOW_LOCAL_HTTP and re.match(r"^http://(127\.0\.0\.1|localhost)[:/]", url) is not None
+
+
+def settings_error(b):
+    """(field, message) for an invalid job-portal setting, else None."""
+    if "fallback_portals" in b:
+        v = b["fallback_portals"]
+        if not isinstance(v, list) or not all(k in portals.PORTALS for k in v):
+            return "fallback_portals", "Choose job portals from the list."
+    if "ai_answers" in b and not isinstance(b["ai_answers"], bool):
+        return "ai_answers", "Choose on or off for Claude answers."
+    if "portal_pause_s" in b:
+        lo, hi = config.PORTAL_PAUSE_RANGE
+        v = b["portal_pause_s"]
+        if isinstance(v, bool) or not isinstance(v, (int, float, str)) or not re.fullmatch(r"\s*\d+\s*", str(v)) \
+                or not lo <= int(v) <= hi:
+            return "portal_pause_s", f"Enter a whole number of seconds from {lo} to {hi}."
+    return None
+
+
 def make_handler(db: DB):
+    runner = autoapply.Runner(db)
+
     class H(BaseHTTPRequestHandler):
+        auto = runner
         server_version = "RMJF"
 
         def log_message(self, fmt, *args):  # never log query strings (may contain filters) or bodies
@@ -83,11 +110,13 @@ def make_handler(db: DB):
                 return self.send(200, search.latest_results(db) or {"jobs": [], "params": None})
             if path == "/api/saved":
                 res = []
+                last = db.last_search()
+                prof = search.matching.effective_profile(db.get_profile(), json.loads(last["params"]) if last else {})
                 for k, st in db.job_states().items():
                     if st == "saved":
                         p = db.posting(k)
                         if p:
-                            p.update(search.matching.score(p, db.get_profile() or {}, db.get_setting("seniority", "mid")))
+                            p.update(search.matching.score(p, prof, db.get_setting("seniority", "mid")))
                             p["state"] = st
                             res.append(p)
                 res.sort(key=lambda p: -p["score"])
@@ -96,6 +125,29 @@ def make_handler(db: DB):
             if m:
                 run = search.RUNS.get(m.group(1))
                 return self.send(200, run.snapshot()) if run else self.err(404, "Search not found")
+            if path == "/api/applications":
+                return self.send(200, runner.snapshot())
+            if path == "/api/portals":
+                return self.send(200, applying.ASSISTANT.portal_status())
+            m = re.fullmatch(r"/api/applications/([0-9a-f]{16})(/proof)?", path)
+            if m:
+                a = db.app_get(m.group(1))
+                if not a:
+                    return self.err(404, "No application for this job yet.")
+                if not m.group(2):
+                    return self.send(200, a)
+                proof = a.get("proof")
+                folder = config.APPLICATIONS_DIR.resolve()
+                from pathlib import Path
+                if not proof or Path(proof).resolve().parent != folder or not Path(proof).is_file():
+                    return self.err(404, "No proof screenshot.")
+                return self.send(200, Path(proof).read_bytes(), "image/png")
+            if path == "/api/apply/details":
+                p = details.path()
+                d = details.load()
+                rf = details.resume_file()
+                return self.send(200, {"exists": d is not None, "path": str(p), "fields": len(d or {}),
+                                       "resume_file": rf.name if rf else None})
             if path == "/api/export.csv":
                 return self.export()
             return self.err(404, "Not found")
@@ -125,6 +177,50 @@ def make_handler(db: DB):
                         return self.err(400, "Unknown state")
                     db.set_job_state(m.group(1), st)
                     return self.send(200, {"ok": True, "state": st})
+                m = re.fullmatch(r"/api/jobs/([0-9a-f]{16})/apply", path)
+                if m:
+                    job = db.posting(m.group(1))
+                    if not job:
+                        return self.err(404, "Job not found. Run the search again.")
+                    if not job_url_ok(job.get("url")):
+                        return self.err(400, "This job has no application link.")
+                    return self.apply_call(applying.ASSISTANT.open, dict(job, ai=db.settings().get("ai_answers", True)))
+                if path == "/api/autoapply":
+                    keys = self.body_json().get("keys") or []
+                    if not isinstance(keys, list) or not all(isinstance(k, str) and re.fullmatch(r"[0-9a-f]{16}", k) for k in keys):
+                        return self.err(400, "Choose the jobs to apply to.")
+                    keys = [k for k in keys if job_url_ok((db.posting(k) or {}).get("url"))]
+                    return self.send(202, {"queued": runner.enqueue(keys), **runner.snapshot()})
+                if path == "/api/autoapply/cancel":
+                    return self.send(200, {"cancelled": runner.cancel(), **runner.snapshot()})
+                m = re.fullmatch(r"/api/portals/(check|naukri/signin|linkedin/signin)", path)
+                if m:
+                    if runner.busy():
+                        return self.err(409, "Auto apply is using the browser. Try again when it has finished, or cancel it.")
+                    if m.group(1) == "check":
+                        return self.apply_call(applying.ASSISTANT.check_portals)
+                    return self.apply_call(applying.ASSISTANT.signin, m.group(1).split("/")[0])
+                if path == "/api/applications/answers":
+                    answers = self.body_json().get("answers", {})
+                    if not isinstance(answers, dict):
+                        return self.err(400, "The request could not be read.")
+                    answers = {str(k)[:20]: str(v)[:4000] for k, v in answers.items()}
+                    return self.send(200, {**runner.answer(answers), **runner.snapshot()})
+                m = re.fullmatch(r"/api/applications/([0-9a-f]{16})/(retry|mark)", path)
+                if m:
+                    ok = runner.retry(m.group(1)) if m.group(2) == "retry" else runner.mark_applied(m.group(1))
+                    if not ok:
+                        return self.err(409, "That application can't be changed now.")
+                    return self.send(200, runner.snapshot())
+                m = re.fullmatch(r"/api/apply/([0-9a-f]{12})/(answers|rescan)", path)
+                if m:
+                    if m.group(2) == "rescan":
+                        return self.apply_call(applying.ASSISTANT.rescan, m.group(1))
+                    answers = self.body_json().get("answers", {})
+                    if not isinstance(answers, dict):
+                        return self.err(400, "The request could not be read.")
+                    answers = {str(k)[:40]: str(v)[:4000] for k, v in answers.items()}
+                    return self.apply_call(applying.ASSISTANT.answer, m.group(1), answers)
                 if path == "/api/sources":
                     b = self.body_json()
                     kind, token = b.get("kind", ""), (b.get("token") or "").strip()
@@ -160,6 +256,15 @@ def make_handler(db: DB):
                     db.save_profile(list(dict.fromkeys(skills)), titles, years)
                     return self.send(200, {"profile": db.get_profile()})
                 if path == "/api/settings":
+                    bad = settings_error(b)  # validated first: on any error nothing is saved
+                    if bad:
+                        return self.err(400, bad[1], bad[0])
+                    if "fallback_portals" in b:
+                        db.set_setting("fallback_portals", [k for k in portals.PORTALS if k in b["fallback_portals"]])
+                    if "ai_answers" in b:
+                        db.set_setting("ai_answers", b["ai_answers"])
+                    if "portal_pause_s" in b:
+                        db.set_setting("portal_pause_s", int(b["portal_pause_s"]))
                     allowed = {"min_score": int, "max_age_days": int, "mode": str, "seniority": str,
                                "countries": list, "target_companies": list}
                     for k, typ in allowed.items():
@@ -188,6 +293,17 @@ def make_handler(db: DB):
             return self.err(404, "Not found")
 
         # ---------- handlers ----------
+        def apply_call(self, fn, *args):
+            try:
+                return self.send(200, fn(*args))
+            except applying.ApplyError as e:
+                return self.err(422, str(e))
+            except TimeoutError:
+                return self.err(504, "The application page took too long. Check the browser window, then press Scan again.")
+            except Exception as e:  # noqa: BLE001 - browser errors must reach the user, not kill the server
+                sys.stderr.write(f"apply error: {e!r}\n")
+                return self.err(500, "The browser step failed: " + str(e).splitlines()[0][:200] if str(e) else "The browser step failed.")
+
         def upload(self):
             n = int(self.headers.get("Content-Length") or 0)
             if n > config.MAX_UPLOAD_BYTES:

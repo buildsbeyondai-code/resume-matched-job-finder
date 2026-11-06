@@ -26,6 +26,7 @@
   <a href="#search" data-tab="search">Search</a>
   <a href="#profile" data-tab="profile">Resume profile</a>
   <a href="#saved" data-tab="saved">Saved <span id="savedCount" class="count"></span></a>
+  <a href="#applications" data-tab="applications">Applications <span id="appCount" class="count"></span></a>
   <a href="#settings" data-tab="settings">Settings</a>
 </nav>
 <div id="announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
@@ -69,7 +70,8 @@
   <section id="results" aria-labelledby="h-results" hidden>
     <div class="row between wrap">
       <h2 id="h-results" class="h3">Matches <span id="resultMeta" class="muted"></span></h2>
-      <a class="btn text" id="exportLink" href="/api/export.csv" download>Export CSV</a>
+      <div class="row"><button type="button" class="btn secondary" id="autoBtn">Auto apply</button>
+        <a class="btn text" id="exportLink" href="/api/export.csv" download>Export CSV</a></div>
     </div>
     <form id="refineForm" class="refine" aria-label="Refine results">
       <div class="field small"><label for="r-min">Minimum match</label>
@@ -84,7 +86,7 @@
       <button type="button" class="btn text" id="undoBtn">Undo</button></div>
     <div id="emptyResults" class="empty" hidden>
       <h3>No jobs match these filters</h3>
-      <p id="emptyWhy" class="desc">Try fewer keywords, another work mode, or a lower minimum match.</p>
+      <p id="emptyWhy">Try fewer keywords, another work mode, or a lower minimum match.</p>
       <button type="button" class="btn secondary" id="widenBtn">Widen filters</button>
     </div>
     <ol id="jobList" class="job-list"></ol>
@@ -94,6 +96,25 @@
     <h2 class="h3">No searches yet</h2>
     <p class="desc">Set your filters above and select Search. Results are kept on this computer.</p>
   </div>
+</section>
+
+<section id="view-applications" data-view="applications" aria-labelledby="h-applications" hidden>
+  <h1 id="h-applications">Applications</h1>
+  <p class="desc">Auto apply submits each application on the company's own website, using resume_details.md and your resume. When a company has no application of its own, it uses the job portals turned on in Settings (Naukri, then LinkedIn). Jobs are never applied for through an aggregator.</p>
+  <p id="appSummary" class="chips" role="status"></p>
+  <div id="appRun" class="panel run-panel" hidden>
+    <p><span id="appProgress" role="status" aria-live="polite"></span> <strong id="appCountdown" aria-hidden="true"></strong></p>
+    <button type="button" class="btn text" id="appCancel">Cancel auto apply</button>
+  </div>
+  <form id="qForm" class="panel" novalidate hidden aria-labelledby="h-q">
+    <h2 id="h-q" class="h3">Answer once, apply everywhere</h2>
+    <p class="hint">These required questions aren't in resume_details.md. Answers are saved there, and the waiting applications continue automatically.</p>
+    <div id="qList" class="apply-qs"></div>
+    <div class="row end"><button type="submit" class="btn primary" id="qSave">Save and continue</button></div>
+  </form>
+  <ol id="appList" class="app-list"></ol>
+  <div id="appEmpty" class="empty" hidden><h2 class="h3">No applications yet</h2>
+    <p>Run a search, then select Auto apply, or Apply on a single job.</p></div>
 </section>
 
 <section id="view-profile" data-view="profile" aria-labelledby="h-profile" hidden>
@@ -144,8 +165,35 @@
     <div class="field small"><label for="s-age">Ignore postings older than (days)</label><input id="s-age" type="number" min="1" max="365"></div>
     <div class="field span-all"><label for="s-companies">Target companies</label><input id="s-companies" autocomplete="off" aria-describedby="d-scomp">
       <span id="d-scomp" class="hint desc">Quick-fill list for the Companies filter on the Search tab</span></div>
+    <fieldset class="span-all fieldset">
+      <legend class="h3">AI answers</legend>
+      <label class="check" for="s-ai"><input type="checkbox" id="s-ai" aria-describedby="d-ai"> Let Claude Opus 5.5 answer questions my resume details don't cover</label>
+      <p id="d-ai" class="hint desc">Sends the form's questions, the job, resume_details.md and your resume text to Claude (Anthropic) through your Claude Code sign-in. Claude answers only from those facts; anything it can't support (salary, notice period, visa, legal consents) is still asked here. Turn off to keep your resume on this computer.</p>
+    </fieldset>
+    <fieldset class="span-all fieldset">
+      <legend class="h3">Job portals (last resort)</legend>
+      <p class="hint desc">Used only when a company has no application on its own website: Naukri first, then LinkedIn, one application at a time in the app's browser. Automated applying may break these sites' terms of use.</p>
+      <div class="row wrap">
+        <label class="check" for="s-naukri"><input type="checkbox" id="s-naukri" value="naukri"> Apply on Naukri</label>
+        <label class="check" for="s-linkedin"><input type="checkbox" id="s-linkedin" value="linkedin"> Apply on LinkedIn (Easy Apply)</label>
+      </div>
+      <div class="field small"><label for="s-pause">Pause between portal applications</label>
+        <span class="unit"><input id="s-pause" type="number" min="5" max="600" step="1" inputmode="numeric" aria-describedby="s-pause-unit s-pause-err"><span id="s-pause-unit">seconds (5 to 600)</span></span>
+        <p id="s-pause-err" class="field-error" role="alert" hidden></p></div>
+    </fieldset>
     <div class="actions span-all"><button type="submit" class="btn primary">Save settings</button><span id="settingsSaved" class="muted" role="status"></span></div>
   </form>
+  <section class="panel" aria-labelledby="h-portal-signin">
+    <h2 id="h-portal-signin" class="h3">Portal sign-in</h2>
+    <p class="desc">Sign in once in the app's browser window. The app stores no passwords: the session stays in the browser profile on this computer. The app never creates accounts or solves CAPTCHAs.</p>
+    <ul id="portalStatus" class="plain"></ul>
+    <div class="row wrap">
+      <button type="button" class="btn text" id="signNaukri" data-portal="naukri">Sign in to Naukri</button>
+      <button type="button" class="btn text" id="signLinkedin" data-portal="linkedin">Sign in to LinkedIn</button>
+      <button type="button" class="btn text" id="checkPortals">Check sign-in status</button>
+    </div>
+    <p id="portalMsg" class="muted" role="status"></p>
+  </section>
   <div class="panel">
     <h2 class="h3">Job sources</h2>
     <p class="desc">Only official public job-board APIs and licensed aggregators are used. The Adzuna key is read from the ADZUNA_APP_ID and ADZUNA_APP_KEY environment variables and is never shown here.</p>
@@ -177,18 +225,41 @@
     <button type="button" class="btn danger" id="confirmOk">Delete all data</button></div>
 </dialog>
 
+<dialog id="applyDlg" class="apply-dlg" aria-labelledby="applyTitle">
+  <h2 id="applyTitle" class="h3">Apply</h2>
+  <p id="applyStatus" role="status" aria-live="polite"></p>
+  <form id="applyForm" novalidate hidden>
+    <p class="hint">Your resume details don't answer these required questions. Answers are saved to resume_details.md, so you won't be asked again.</p>
+    <div id="applyQs" class="apply-qs"></div>
+    <div class="row end"><button type="submit" class="btn primary" id="applySave">Save and continue</button></div>
+  </form>
+  <div id="applyAI"></div>
+  <p id="applyProof" hidden><a id="applyProofLink" target="_blank" rel="noopener">View proof screenshot</a></p>
+  <div class="row end"><button type="button" class="btn text" id="applyRetry" hidden>Retry</button>
+    <button type="button" class="btn secondary" id="applyClose">Close</button></div>
+</dialog>
+
+<dialog id="autoDlg" aria-labelledby="autoTitle">
+  <h2 id="autoTitle" class="h3">Auto apply</h2>
+  <p id="autoText"></p>
+  <div class="row end"><button type="button" class="btn text" id="autoCancel">Cancel</button>
+    <button type="button" class="btn primary" id="autoOk">Submit applications</button></div>
+</dialog>
+
 <template id="jobTpl">
   <li class="job">
     <article>
       <div class="job-head">
         <div class="score"><span class="score-num"></span><span class="score-label"></span></div>
         <div class="job-main">
-          <h3 class="job-title"><button type="button" class="linklike expand" aria-expanded="false"></button></h3>
+          <h3 class="job-title"><a class="job-link" target="_blank" rel="noopener noreferrer"></a></h3>
           <p class="job-sub"></p>
           <p class="chips"></p>
         </div>
         <div class="job-actions">
-          <a class="btn text view" target="_blank" rel="noopener noreferrer">View posting<span class="sr-only"> (opens in a new tab)</span></a>
+          <button type="button" class="btn primary apply">Apply</button>
+          <a class="btn secondary view" target="_blank" rel="noopener noreferrer">Open job ↗<span class="sr-only"> (opens in a new tab)</span></a>
+          <button type="button" class="btn text expand" aria-expanded="false">Details</button>
           <button type="button" class="btn text save"></button>
           <button type="button" class="btn text hide">Hide</button>
         </div>
@@ -197,6 +268,7 @@
         <p><strong>Matched skills:</strong> <span class="matched"></span></p>
         <p><strong>Missing skills:</strong> <span class="missing"></span></p>
         <p class="sources-line"></p>
+        <p class="job-url"></p>
         <p class="job-desc"></p>
       </div>
     </article>

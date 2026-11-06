@@ -23,6 +23,30 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(r["years"], 6.0)
         self.assertIn("Senior Software Engineer", r["titles"])
 
+    def test_resume_ai_skills_years_and_garbage_rejected(self):
+        from app.resume import readable, extract_years
+        from app.skills import find_skills
+        sk = find_skills("Built GenAI and AI agents with RAG, MCP and prompt engineering; led release planning "
+                         "and stakeholder engagement. I excel in delivery.")
+        for s in ("Generative AI", "AI Agents", "RAG", "MCP", "Prompt Engineering", "Release Management",
+                  "Stakeholder Management", "Artificial Intelligence"):
+            self.assertIn(s, sk)
+        self.assertNotIn("Excel", sk)
+        self.assertEqual(extract_years("A 06/2010 - 12/2016 B 01/2017 - 12/2021 C 01/2022 - 12/2024 D 01/2025 - Current"),
+                         float(time.localtime().tm_year - 2010))
+        self.assertFalse(readable("\x01\x02\xf2\n\x02%\n" * 200))
+
+    def test_score_does_not_expect_every_skill(self):
+        job = {"title": "AI Program Manager", "skills": ["Python", "Generative AI", "AI Agents", "Kubernetes",
+                                                         "Java", "Program Management", "Agile", "Azure"]}
+        prof = {"skills": ["Python", "Generative AI", "AI Agents", "Program Management", "Release Management",
+                           "RAG", "MCP", "SQL", "Docker", "Git"], "titles": ["Program Manager"], "years": 16}
+        r = matching.score(job, prof, "senior")
+        self.assertGreaterEqual(r["score"], 80)  # 4 of 8 job skills matched; unrelated resume skills cost nothing
+        self.assertEqual(r["missing"], ["Kubernetes", "Java", "Agile", "Azure", "Artificial Intelligence"])
+        thin = matching.score({"title": "QA Engineer", "skills": ["Testing"]}, prof | {"skills": ["Testing"]}, "senior")
+        self.assertLess(thin["score"], 60)  # one recognised skill is not a strong match
+
     def test_m1_docx(self):
         r = parse_resume(make_docx(), "cv.docx")
         self.assertEqual(r["kind"], "docx")
@@ -81,8 +105,11 @@ class AdapterContractTests(unittest.TestCase):
                 sources.ADAPTERS["adzuna"].urls(AZ, {"countries": ["Germany"]})
             os.environ["ADZUNA_APP_ID"], os.environ["ADZUNA_APP_KEY"] = "id1", "secretkey"
             urls = sources.ADAPTERS["adzuna"].urls(AZ, {"countries": ["Germany", "India"], "mode": "remote", "skills": ["Python"]})
-            self.assertEqual(len(urls), 2)
-            self.assertIn("/jobs/de/search/1", urls[0])
+            self.assertEqual(len(urls), 4)  # 2 countries x 2 pages
+            self.assertIn("/jobs/de/search/1", urls[0]); self.assertIn("/jobs/de/search/2", urls[1])
+            # each term once: a repeated word made Adzuna's all-words match return almost nothing
+            u = sources.ADAPTERS["adzuna"].urls(AZ, {"countries": ["India"], "mode": "remote", "keywords": "AI", "skills": ["AI"]})[0]
+            self.assertIn("what=AI+remote&", u + "&"); self.assertNotIn("what_or", u)
             self.assertNotIn("secretkey", sources.redact(urls[0]))
         finally:
             os.environ.pop("ADZUNA_APP_ID", None); os.environ.pop("ADZUNA_APP_KEY", None)
@@ -176,3 +203,19 @@ class MatchingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoResumeScoringTests(unittest.TestCase):
+    def test_scores_by_search_terms_when_no_resume(self):
+        from app import matching
+        prof = matching.search_profile({"keywords": "AI", "skills": ["AI"]})
+        hit = matching.score({"title": "AI Architect", "description": "Build AI systems", "skills": []}, prof)
+        miss = matching.score({"title": "Accountant", "description": "Ledgers", "skills": []}, prof)
+        self.assertGreaterEqual(hit["score"], 90)
+        self.assertGreaterEqual(miss["score"], 40)  # never hidden by the default minimum of 40
+        self.assertGreater(hit["score"], miss["score"])
+
+    def test_remote_mention_in_description(self):
+        from app import matching
+        self.assertEqual(matching.detect_mode({"title": "Engineer", "location": "India", "description": "This is a remote role."}), "remote")
+        self.assertEqual(matching.detect_mode({"title": "Engineer", "location": "India", "description": "Not remote. On-site in Pune."}), "onsite")
